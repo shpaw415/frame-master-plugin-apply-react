@@ -14,10 +14,6 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
 
-    // Type definitions
-    "typeRoots": ["./node_modules/@types", "./"],
-    "types": [],
-
     // Best practices
     "strict": true,
     "skipLibCheck": true,
@@ -30,5 +26,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "include": ["src/**/*", "src/**/*.d.ts", "./**/*.d.ts"]
+  "include": ["src/**/*", "./**/*.d.ts"]
 }

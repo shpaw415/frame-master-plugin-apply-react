@@ -10,3 +10,7 @@ declare module "client:routes" {
   const routes: Record<string, () => JSX.Element>;
   export default routes;
 }
+
+declare global {
+  var HMR_ENABLED: boolean;
+}

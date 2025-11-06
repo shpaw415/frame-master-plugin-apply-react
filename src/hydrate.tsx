@@ -1,5 +1,6 @@
 /// <reference path="./ambient.d.ts" />
-import { StrictMode, type JSX } from "react";
+
+import { StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
 import Shell from "client:shell";
 import _ROUTES_ from "client:routes";

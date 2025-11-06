@@ -3,9 +3,7 @@ import {
   directiveToolSingleton,
   type FrameMasterPlugin,
 } from "frame-master/plugin";
-import { pluginRegex } from "frame-master/utils";
 import { join } from "path";
-import React from "react";
 
 /**
  * Configuration options for the Apply-React plugin
@@ -154,14 +152,8 @@ export default function applyReactPluginToHTML(
 
     const rewriter = new HTMLRewriter().on("head", {
       element(element) {
-        [
-          `<script src="${hydratePath}" type="module"></script>`,
-          `<script> globalThis.process = {};
-          globalThis.process.PUBLIC_HMR_ENABLED = ${
-            enableHMR ? `"true"` : `"false"`
-          }; </script>`,
-        ].forEach((injectElement) =>
-          element.append(injectElement, { html: true })
+        [`<script src="${hydratePath}" type="module"></script>`].forEach(
+          (injectElement) => element.append(injectElement, { html: true })
         );
       },
     });
@@ -373,6 +365,13 @@ export default function applyReactPluginToHTML(
           ws.send("update-routes");
         });
       });
+    },
+    router: {
+      before_request(master) {
+        master.setGlobalValues({
+          HMR_ENABLED: process.env.NODE_ENV == "production" ? false : true,
+        });
+      },
     },
   };
 }

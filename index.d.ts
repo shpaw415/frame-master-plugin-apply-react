@@ -13,6 +13,6 @@ declare module "client:routes" {
 
 declare global {
   var _ROUTES_: Record<string, () => JSX.Element>;
+  var HMR_ENABLED: boolean;
 }
-
 export {};

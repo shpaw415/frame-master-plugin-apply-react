@@ -25,9 +25,9 @@ export function setupHMR(
     const message = event.data as "update-routes";
     switch (message) {
       case "update-routes":
-        // @ts-ignore
-        const newRoutes = (await import(`/client:routes.js?t=${Date.now()}`))
-          .default;
+        const newRoutes = (
+          await import(`/routes/client:routes.js?t=${Date.now()}`)
+        ).default;
         globalThis._ROUTES_ = newRoutes;
         await onRoutesUpdate(newRoutes);
         break;

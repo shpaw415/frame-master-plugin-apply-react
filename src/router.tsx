@@ -32,7 +32,7 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 
   useEffect(
     () =>
-      process.env.PUBLIC_HMR_ENABLED === "true"
+      globalThis.HMR_ENABLED
         ? setupHMR((newRoutes) => {
             setRoutes(newRoutes);
             setCurrentPage(createPage(window.location.pathname, newRoutes));
