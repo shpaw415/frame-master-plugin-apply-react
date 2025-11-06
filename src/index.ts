@@ -155,9 +155,11 @@ export default function applyReactPluginToHTML(
       element(element) {
         [
           `<script src="${hydratePath}" type="module"></script>`,
-          `<script> process.env = JSON.parse(${JSON.stringify({
-            NODE_ENV: process.env.NODE_ENV,
-            HMR_ENABLED: enableHMR,
+          `<script> globalThis.process = JSON.parse(${JSON.stringify({
+            env: {
+              NODE_ENV: process.env.NODE_ENV,
+              HMR_ENABLED: enableHMR,
+            },
           })}); </script>`,
         ].forEach((injectElement) =>
           element.append(injectElement, { html: true })
