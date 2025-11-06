@@ -128,6 +128,7 @@ export default function applyReactPluginToHTML(
     route,
     enableHMR = process.env.NODE_ENV != "production",
   } = props;
+  process.env.PUBLIC_HMR_ENABLED = enableHMR ? "true" : "false";
   const cwd = process.cwd();
   const pathToHydrate = join(`${import.meta.dir}`, "hydrate.tsx");
 
@@ -155,12 +156,9 @@ export default function applyReactPluginToHTML(
       element(element) {
         [
           `<script src="${hydratePath}" type="module"></script>`,
-          `<script> globalThis.process = ${JSON.stringify({
-            env: {
-              NODE_ENV: process.env.NODE_ENV,
-              HMR_ENABLED: enableHMR,
-            },
-          })}; </script>`,
+          `<script> globalThis.process.PUBLIC_HMR_ENABLED = ${
+            enableHMR ? "true" : "false"
+          }; </script>`,
         ].forEach((injectElement) =>
           element.append(injectElement, { html: true })
         );
