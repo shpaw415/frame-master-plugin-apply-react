@@ -156,8 +156,9 @@ export default function applyReactPluginToHTML(
       element(element) {
         [
           `<script src="${hydratePath}" type="module"></script>`,
-          `<script> globalThis.process.PUBLIC_HMR_ENABLED = ${
-            enableHMR ? "true" : "false"
+          `<script> globalThis.process = {};
+          globalThis.process.PUBLIC_HMR_ENABLED = ${
+            enableHMR ? `"true"` : `"false"`
           }; </script>`,
         ].forEach((injectElement) =>
           element.append(injectElement, { html: true })
