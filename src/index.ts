@@ -207,6 +207,7 @@ export default function applyReactPluginToHTML(
         ],
         define: {
           "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
+          "process.env.HMR_ENABLED": JSON.stringify(enableHMR),
         },
         plugins: [
           {
