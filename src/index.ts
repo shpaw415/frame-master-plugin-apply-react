@@ -206,7 +206,6 @@ export default function applyReactPluginToHTML(
             : [...ReactEntryPoints, ...DevReactEntryPoints]),
           "client:routes",
         ],
-        external: process.env.NODE_ENV === "production" ? ReactEntryPoints : [],
         plugins: [
           {
             name: "apply-routes-to-hydrate",
