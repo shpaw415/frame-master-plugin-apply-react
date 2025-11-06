@@ -194,7 +194,7 @@ export default function applyReactPluginToHTML(
           ...(process.env.NODE_ENV === "production"
             ? []
             : [...ReactEntryPoints, ...DevReactEntryPoints]),
-          "client:routes",
+          join("routes", "client:routes"),
         ],
         plugins: [
           {
@@ -222,29 +222,44 @@ export default function applyReactPluginToHTML(
               // get the original file instead of the parsed file from other plugins
               build.onResolve(
                 {
-                  filter: pluginRegex({
-                    path: ["!__ORIGINAL__!"],
-                    ext: ["tsx"],
-                  }),
+                  filter: /^original:\.*/,
                 },
                 (args) => {
+                  const realPath = args.path.replace("original:", "");
+
+                  const ext = realPath.split(".").pop()!;
+
+                  const splitedPath = realPath.split("/");
+
+                  const fileName = splitedPath.pop()?.split(".").shift()!;
+
+                  splitedPath.push(`_${fileName}_.${ext}`);
+
                   return {
                     namespace: "__ORIGINAL__",
-                    path: args.path,
+                    path: splitedPath.join("/"),
                   };
                 }
               );
 
               build.onLoad(
                 {
-                  filter: pluginRegex({
-                    path: ["!__ORIGINAL__!"],
-                    ext: ["tsx"],
-                  }),
+                  filter: /.*/,
                   namespace: "__ORIGINAL__",
                 },
                 async (args) => {
-                  const realFilePath = args.path.replace("!__ORIGINAL__!/", "");
+                  const splitedPath = args.path.split("/");
+                  const fileNameWithExt = splitedPath.pop()!;
+
+                  const ext = fileNameWithExt.split(".").pop()!;
+                  const fileName = fileNameWithExt.split(".").shift()!;
+
+                  const realFilePath = join(
+                    "/",
+                    ...splitedPath,
+                    `${fileName.slice(1, -1)}.${ext}`
+                  );
+
                   const fileContent = await Bun.file(realFilePath).text();
 
                   const isServerOnlyModule =
@@ -266,24 +281,17 @@ export default function applyReactPluginToHTML(
               );
 
               build.onResolve({ filter: /client:shell/ }, (args) => {
-                return { path: pathToClientShell, namespace: "client-shell" };
+                return { path: pathToClientShell };
               });
-              build.onLoad(
-                { filter: /client:shell/, namespace: "client-shell" },
-                async (args) => {
-                  const fileContent = await Bun.file(args.path).text();
-                  return {
-                    contents: fileContent,
-                    loader: args.loader,
-                  };
-                }
-              );
 
-              build.onResolve({ filter: /client:routes/ }, (args) => {
-                return { path: "client:routes", namespace: "client-routes" };
+              build.onResolve({ filter: /^.*client:routes$/ }, (args) => {
+                return {
+                  path: "client-routes",
+                  namespace: "client-routes",
+                };
               });
               build.onLoad(
-                { filter: /client:routes/, namespace: "client-routes" },
+                { filter: /.*/, namespace: "client-routes" },
                 async (args) => {
                   const routePathname = Object.keys(fileRouter.routes);
 
@@ -296,7 +304,8 @@ export default function applyReactPluginToHTML(
                           "_"
                         )
                           .replaceAll(" ", "_")
-                          .replaceAll(".", "_"),
+                          .replaceAll(".", "_")
+                          .replaceAll("-", "_"),
                         filePath: fileRouter.routes[pathname]!,
                       },
                     }))
@@ -315,7 +324,7 @@ export default function applyReactPluginToHTML(
                   return {
                     contents: [
                       ...Object.entries(parsedFileNames).map(([_, v]) => {
-                        return `import {default as ${v.defaultExport}} from "!__ORIGINAL__!/${v.filePath}";`;
+                        return `import {default as ${v.defaultExport}} from "original:${v.filePath}";`;
                       }),
                       toRouteObject(),
                       `export default _ROUTES_;`,
