@@ -155,20 +155,10 @@ export default function applyReactPluginToHTML(
       element(element) {
         [
           `<script src="${hydratePath}" type="module"></script>`,
-          ...(process.env.NODE_ENV == "production"
-            ? [
-                `<script type="importmap">${JSON.stringify({
-                  imports: {
-                    react: `https://unpkg.com/react@${
-                      React?.version || 19
-                    }/umd/react.production.min.js`,
-                    "react-dom": `https://unpkg.com/react-dom@${
-                      React?.version || 19
-                    }/umd/react-dom.production.min.js`,
-                  },
-                })}</script>`,
-              ]
-            : []),
+          `<script> process.env = JSON.parse(${JSON.stringify({
+            NODE_ENV: process.env.NODE_ENV,
+            HMR_ENABLED: enableHMR,
+          })}); </script>`,
         ].forEach((injectElement) =>
           element.append(injectElement, { html: true })
         );
@@ -205,10 +195,6 @@ export default function applyReactPluginToHTML(
             : [...ReactEntryPoints, ...DevReactEntryPoints]),
           "client:routes",
         ],
-        define: {
-          "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
-          "process.env.HMR_ENABLED": JSON.stringify(enableHMR),
-        },
         plugins: [
           {
             name: "apply-routes-to-hydrate",
