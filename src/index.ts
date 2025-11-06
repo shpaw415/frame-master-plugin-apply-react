@@ -193,7 +193,6 @@ export default function applyReactPluginToHTML(
     "node_modules/react-dom/cjs/react-dom.development.js",
   ];
   const wsList: Bun.ServerWebSocket[] = [];
-  let dry = true;
   return {
     name: "apply-react-to-html-plugin",
     version: "1.0.0",
@@ -206,6 +205,9 @@ export default function applyReactPluginToHTML(
             : [...ReactEntryPoints, ...DevReactEntryPoints]),
           "client:routes",
         ],
+        define: {
+          "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
+        },
         plugins: [
           {
             name: "apply-routes-to-hydrate",
