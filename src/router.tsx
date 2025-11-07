@@ -16,7 +16,9 @@ import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
  * @returns The current page component based on the active route
  */
 export function RouterHost({ children }: { children: JSX.Element }) {
-  const [currentPage, setCurrentPage] = useState<JSX.Element>(children);
+  const [CurrentPage, setCurrentPage] = useState<() => JSX.Element>(
+    () => children
+  );
   const [routes, setRoutes] = useState(
     typeof window == "undefined" ? {} : globalThis._ROUTES_
   );
@@ -24,8 +26,12 @@ export function RouterHost({ children }: { children: JSX.Element }) {
   const createPage = useCallback(
     (pathname: string, routes: typeof globalThis._ROUTES_) => {
       const layouts = getRelatedLayoutFromPathname(pathname);
-      const page = routes[pathname]!();
-      return <WrapWithLayouts layouts={layouts}>{page}</WrapWithLayouts>;
+      const Page = routes[pathname]!;
+      return () => (
+        <WrapWithLayouts layouts={layouts}>
+          <Page />
+        </WrapWithLayouts>
+      );
     },
     [routes]
   );
@@ -77,5 +83,5 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     };
   }, [routes, createPage]);
 
-  return currentPage;
+  return CurrentPage;
 }

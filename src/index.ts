@@ -35,7 +35,7 @@ export type ApplyReactPluginOptions = {
    * Hydration method to use on the client
    *
    * - `"hydrate"`: Attaches event listeners to existing server-rendered HTML (default)
-   * - `"render"`: Fully re-renders the component tree on the client
+   * - `"render"`: Fully re-renders the component tree on the client ( not supported yet )
    *
    * @default "hydrate"
    */
@@ -101,7 +101,6 @@ async function toEmptyFileFromFilePath(filePath: string): Promise<{
  * @param props - Plugin configuration options
  * @param props.style - Routing style convention (currently supports "nextjs")
  * @param props.route - Base path for route files (e.g., "src/pages")
- * @param props.shellPath - Path to the main shell/layout wrapper component
  * @param props.clientShellPath - Optional custom shell for client-side hydration
  * @param props.enableHMR - Enable Hot Module Replacement (default: true on dev & false on prod)
  *
@@ -181,7 +180,7 @@ export default function applyReactPluginToHTML(
     name: "apply-react-to-html-plugin",
     version,
     build: {
-      buildConfig: () => ({
+      buildConfig: {
         entrypoints: [
           pathToHydrate,
           ...(process.env.NODE_ENV === "production"
@@ -333,7 +332,7 @@ export default function applyReactPluginToHTML(
             },
           },
         ],
-      }),
+      },
     },
     serverConfig: {
       routes: {
