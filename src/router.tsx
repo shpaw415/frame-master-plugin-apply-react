@@ -83,5 +83,5 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     };
   }, [routes, createPage]);
 
-  return <CurrentPage />;
+  return CurrentPage;
 }
