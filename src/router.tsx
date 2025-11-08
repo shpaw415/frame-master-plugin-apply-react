@@ -61,14 +61,38 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 
         // Only handle internal links (same origin)
         if (url.origin === window.location.origin) {
+          // Handle hash-only links (anchors on the same page)
+          if (url.pathname === window.location.pathname && url.hash) {
+            // Let the browser handle scrolling to the anchor
+            return;
+          }
+
           e.preventDefault();
 
           // Check if route exists
           if (routes[url.pathname]) {
-            // Update browser history
-            window.history.pushState(null, "", url.pathname);
+            // Update browser history with full URL including hash
+            window.history.pushState(
+              null,
+              "",
+              url.pathname + url.search + url.hash
+            );
             // Update current page
             setCurrentPage(createPage(window.location.pathname, routes));
+
+            // Handle hash scrolling after navigation
+            if (url.hash) {
+              // Use setTimeout to allow the page to render first
+              setTimeout(() => {
+                const element = document.getElementById(url.hash.slice(1));
+                if (element) {
+                  element.scrollIntoView({ behavior: "smooth" });
+                }
+              }, 0);
+            } else {
+              // Scroll to top if no hash
+              window.scrollTo(0, 0);
+            }
           }
         }
       }
@@ -83,5 +107,5 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     };
   }, [routes, createPage]);
 
-  return CurrentPage;
+  return CurrentPage as unknown as JSX.Element;
 }
