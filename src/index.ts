@@ -182,11 +182,11 @@ export default function applyReactPluginToHTML(
     build: {
       buildConfig: {
         entrypoints: [
-          pathToHydrate,
           ...(process.env.NODE_ENV === "production"
             ? []
             : [...ReactEntryPoints, ...DevReactEntryPoints]),
           join("routes", "client:routes"),
+          join("apply-react", "client:hydrate"),
         ],
         plugins: [
           {
@@ -324,6 +324,17 @@ export default function applyReactPluginToHTML(
                     loader: args.loader,
                   };
                 }
+              );
+
+              build.onResolve({ filter: /.*client:hydrate$/ }, (args) => {
+                return { path: pathToHydrate, namespace: "client-hydrate" };
+              });
+              build.onLoad(
+                { filter: /.*/, namespace: "client-hydrate" },
+                async (args) => ({
+                  contents: await Bun.file(args.path).text(),
+                  loader: "tsx",
+                })
               );
 
               build.onEnd(async (result) => {

@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "apply-react",
@@ -10,8 +11,8 @@
       },
       "peerDependencies": {
         "frame-master": "^2.0.4",
-        "react": "^19.2.0",
-        "react-dom": "^19.2.0",
+        "react": ">=18.0.0 <20.0.0",
+        "react-dom": ">=18.0.0 <20.0.0",
         "typescript": "^5.9.3",
       },
     },
