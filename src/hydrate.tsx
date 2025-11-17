@@ -10,7 +10,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const rootElement = document.getElementById("root");
   if (rootElement) {
     const PageToRender = _ROUTES_[window.location.pathname];
-    if (!PageToRender) throw new Error("pathname does not exists");
+    if (!PageToRender) {
+      console.error("No page found for pathname:", window.location.pathname);
+      console.error("Available routes:", _ROUTES_);
+      throw new Error("pathname does not exists");
+    }
     const WrappedPage = getRelatedLayoutFromPathname(window.location.pathname)
       .reverse()
       .reduce((Prev, Curr) => <Curr>{Prev}</Curr>, <PageToRender />);
