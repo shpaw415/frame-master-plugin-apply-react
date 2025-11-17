@@ -1,11 +1,6 @@
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
-
-const _ROUTES_ = (
-  (await import(
-    "/routes/client:routes" as string
-  )) as typeof import("routes/client:routes")
-).default;
+import _ROUTES_ from "routes/client:routes";
 
 export function getRelatedLayoutFromPathname(pathname: string) {
   const paths = pathname ? pathname.split("/").filter(Boolean) : [];
