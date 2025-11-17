@@ -9,7 +9,7 @@ import _ROUTES_ from "routes/client:routes";
 document.addEventListener("DOMContentLoaded", async () => {
   const rootElement = document.getElementById("root");
   if (rootElement) {
-    const PageToRender = _ROUTES_[window.location.pathname];
+    const PageToRender = _ROUTES_[formatPathname(window.location.pathname)];
     if (!PageToRender) {
       console.error("No page found for pathname:", window.location.pathname);
       console.error("Available routes:", _ROUTES_);
@@ -27,3 +27,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     );
   }
 });
+
+function formatPathname(pathname: string) {
+  return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
