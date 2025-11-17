@@ -4,6 +4,7 @@ import { StrictMode, type JSX } from "react";
 import { hydrateRoot } from "react-dom/client";
 import Shell from "client:shell";
 import { getRelatedLayoutFromPathname } from "./layout";
+import _ROUTES_ from "routes/client:routes";
 
 document.addEventListener("DOMContentLoaded", async () => {
   const rootElement = document.getElementById("root");

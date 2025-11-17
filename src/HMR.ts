@@ -18,7 +18,9 @@ function initializeWebSocket() {
  * @returns A cleanup function to remove the HMR listener
  */
 export function setupHMR(
-  onRoutesUpdate: (routes: typeof globalThis._ROUTES_) => Promise<void> | void
+  onRoutesUpdate: (
+    routes: typeof import("routes/client:routes")["default"]
+  ) => Promise<void> | void
 ) {
   initializeWebSocket();
   const handleMessage = async (event: MessageEvent) => {
