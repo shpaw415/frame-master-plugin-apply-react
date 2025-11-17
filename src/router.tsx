@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
-import _ROUTES_ from "routes/client:routes";
 
+const _ROUTES_ = (await import(
+  "/routes/client:routes" as string
+)) as typeof import("routes/client:routes").default;
 /**
  * Client-side router component for the Apply-React plugin.
  *

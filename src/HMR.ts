@@ -1,3 +1,5 @@
+import type { JSX } from "react";
+
 let ws: WebSocket;
 
 function initializeWebSocket() {
@@ -19,7 +21,7 @@ function initializeWebSocket() {
  */
 export function setupHMR(
   onRoutesUpdate: (
-    routes: typeof import("routes/client:routes")["default"]
+    routes: Record<string, () => JSX.Element>
   ) => Promise<void> | void
 ) {
   initializeWebSocket();
