@@ -28,7 +28,6 @@ export function setupHMR(
         const newRoutes = (
           await import(`/routes/client:routes.js?t=${Date.now()}`)
         ).default;
-        globalThis._ROUTES_ = newRoutes;
         await onRoutesUpdate(newRoutes);
         break;
     }

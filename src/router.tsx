@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
+import _ROUTES_ from "/routes/client:routes";
 
 /**
  * Client-side router component for the Apply-React plugin.
@@ -20,11 +21,11 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     () => children
   );
   const [routes, setRoutes] = useState(
-    typeof window == "undefined" ? {} : globalThis._ROUTES_
+    typeof window == "undefined" ? {} : _ROUTES_
   );
 
   const createPage = useCallback(
-    (pathname: string, routes: typeof globalThis._ROUTES_) => {
+    (pathname: string, routes: typeof _ROUTES_) => {
       const layouts = getRelatedLayoutFromPathname(pathname);
       const Page = routes[pathname]!;
       return () => (
