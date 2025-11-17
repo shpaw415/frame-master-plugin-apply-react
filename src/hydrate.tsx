@@ -1,16 +1,15 @@
 /// <reference path="./ambient.d.ts" />
 
-import { StrictMode } from "react";
+import { StrictMode, type JSX } from "react";
 import { hydrateRoot } from "react-dom/client";
 import Shell from "client:shell";
-import _ROUTES_ from "client:routes";
 import { getRelatedLayoutFromPathname } from "./layout";
 
-globalThis._ROUTES_ = _ROUTES_;
-
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const rootElement = document.getElementById("root");
   if (rootElement) {
+    const _ROUTES_ = (await import("/routes/client:routes" as string))
+      .default as Record<string, () => JSX.Element>;
     const PageToRender = _ROUTES_[window.location.pathname];
     if (!PageToRender) throw new Error("pathname does not exists");
     const WrappedPage = getRelatedLayoutFromPathname(window.location.pathname)
