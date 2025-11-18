@@ -15,7 +15,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.error("Available routes:", _ROUTES_);
       throw new Error("pathname does not exists");
     }
-    const WrappedPage = getRelatedLayoutFromPathname(window.location.pathname)
+    const WrappedPage = getRelatedLayoutFromPathname(
+      window.location.pathname,
+      _ROUTES_
+    )
       .reverse()
       .reduce((Prev, Curr) => <Curr>{Prev}</Curr>, <PageToRender />);
 
