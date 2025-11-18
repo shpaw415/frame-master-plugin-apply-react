@@ -26,7 +26,7 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 
   const createPage = useCallback(
     (pathname: string, routes: typeof _ROUTES_) => {
-      const layouts = getRelatedLayoutFromPathname(pathname);
+      const layouts = getRelatedLayoutFromPathname(pathname, routes);
       const Page = routes[pathname]!;
       return () => (
         <WrapWithLayouts layouts={layouts}>
