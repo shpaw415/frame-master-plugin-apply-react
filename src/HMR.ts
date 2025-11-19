@@ -1,3 +1,5 @@
+import type { JSX } from "react";
+
 let ws: WebSocket;
 
 function initializeWebSocket() {
@@ -18,7 +20,9 @@ function initializeWebSocket() {
  * @returns A cleanup function to remove the HMR listener
  */
 export function setupHMR(
-  onRoutesUpdate: (routes: typeof globalThis._ROUTES_) => Promise<void> | void
+  onRoutesUpdate: (
+    routes: Record<string, () => JSX.Element>
+  ) => Promise<void> | void
 ) {
   initializeWebSocket();
   const handleMessage = async (event: MessageEvent) => {
@@ -28,7 +32,6 @@ export function setupHMR(
         const newRoutes = (
           await import(`/routes/client:routes.js?t=${Date.now()}`)
         ).default;
-        globalThis._ROUTES_ = newRoutes;
         await onRoutesUpdate(newRoutes);
         break;
     }
