@@ -177,7 +177,7 @@ export default function applyReactPluginToHTML(
   ];
   const wsList: Bun.ServerWebSocket[] = [];
   return {
-    name: "apply-react-to-html-plugin",
+    name: "apply-react",
     version,
     build: {
       buildConfig: {
