@@ -25,9 +25,13 @@ export function RouterHost({ children }: { children: JSX.Element }) {
   );
 
   const createPage = useCallback(
-    (pathname: string, routes: typeof _ROUTES_) => {
+    (_pathname: string, routes: typeof _ROUTES_) => {
+      const pathname = formatPathname(_pathname);
       const layouts = getRelatedLayoutFromPathname(pathname, routes);
-      const Page = routes[pathname]!;
+      const Page = routes[pathname];
+
+      if (!Page) return () => <div>404 - Page Not Found</div>;
+
       return () => (
         <WrapWithLayouts layouts={layouts}>
           <Page />
@@ -54,11 +58,14 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     };
 
     const clickHandler = (e: MouseEvent) => {
+      if (e.ctrlKey) return;
+
       const target = e.target as HTMLElement;
       const anchor = target.closest("a");
 
       if (anchor && anchor.href) {
         const url = new URL(anchor.href);
+        url.pathname = formatPathname(url.pathname);
 
         // Only handle internal links (same origin)
         if (url.origin === window.location.origin) {
@@ -109,4 +116,10 @@ export function RouterHost({ children }: { children: JSX.Element }) {
   }, [routes, createPage]);
 
   return CurrentPage as unknown as JSX.Element;
+}
+
+function formatPathname(pathname: string) {
+  return pathname.endsWith("/") && pathname.length > 1
+    ? pathname.slice(0, -1)
+    : pathname;
 }
