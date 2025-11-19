@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
 import _ROUTES_ from "routes/client:routes";
+import { formatPathname } from "./utils";
 
 /**
  * Client-side router component for the Apply-React plugin.
@@ -116,10 +117,4 @@ export function RouterHost({ children }: { children: JSX.Element }) {
   }, [routes, createPage]);
 
   return CurrentPage as unknown as JSX.Element;
-}
-
-function formatPathname(pathname: string) {
-  return pathname.endsWith("/") && pathname.length > 1
-    ? pathname.slice(0, -1)
-    : pathname;
 }
