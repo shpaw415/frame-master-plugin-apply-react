@@ -71,7 +71,11 @@ export function RouterHost({ children }: { children: JSX.Element }) {
         // Only handle internal links (same origin)
         if (url.origin === window.location.origin) {
           // Handle hash-only links (anchors on the same page)
-          if (url.pathname === window.location.pathname && url.hash) {
+          if (
+            url.pathname === window.location.pathname &&
+            url.search === window.location.search &&
+            url.hash
+          ) {
             // Let the browser handle scrolling to the anchor
             return;
           }
@@ -91,13 +95,13 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 
             // Handle hash scrolling after navigation
             if (url.hash) {
-              // Use setTimeout to allow the page to render first
-              setTimeout(() => {
+              // Use requestAnimationFrame to ensure the element is rendered
+              requestAnimationFrame(() => {
                 const element = document.getElementById(url.hash.slice(1));
                 if (element) {
                   element.scrollIntoView({ behavior: "smooth" });
                 }
-              }, 0);
+              });
             } else {
               // Scroll to top if no hash
               window.scrollTo(0, 0);
