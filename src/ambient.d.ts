@@ -5,7 +5,7 @@ declare module "client:shell" {
   export default Shell;
 }
 
-declare module "client:routes" {
+declare module "routes/client:routes" {
   import type { JSX } from "react";
   const routes: Record<string, () => JSX.Element>;
   export default routes;

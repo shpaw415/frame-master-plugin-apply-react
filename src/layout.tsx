@@ -1,14 +1,18 @@
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
+import type _ROUTES_ from "routes/client:routes";
 
-export function getRelatedLayoutFromPathname(pathname: string) {
+export function getRelatedLayoutFromPathname(
+  pathname: string,
+  routes: typeof _ROUTES_
+) {
   const paths = pathname ? pathname.split("/").filter(Boolean) : [];
   const layouts = Object.assign(
     {},
-    ...Object.entries(globalThis._ROUTES_)
+    ...Object.entries(routes)
       .filter(([pathname, layout]) => pathname.endsWith("layout"))
       .map(([k, v]) => ({ [k]: v }))
-  ) as typeof globalThis._ROUTES_;
+  ) as typeof _ROUTES_;
 
   const relatedLayouts: Array<
     (props: { children: JSX.Element }) => JSX.Element

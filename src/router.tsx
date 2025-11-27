@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
+import _ROUTES_ from "routes/client:routes";
+import { formatPathname } from "./utils";
 
 /**
  * Client-side router component for the Apply-React plugin.
@@ -20,13 +22,17 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     () => children
   );
   const [routes, setRoutes] = useState(
-    typeof window == "undefined" ? {} : globalThis._ROUTES_
+    typeof window == "undefined" ? {} : _ROUTES_
   );
 
   const createPage = useCallback(
-    (pathname: string, routes: typeof globalThis._ROUTES_) => {
-      const layouts = getRelatedLayoutFromPathname(pathname);
-      const Page = routes[pathname]!;
+    (_pathname: string, routes: typeof _ROUTES_) => {
+      const pathname = formatPathname(_pathname);
+      const layouts = getRelatedLayoutFromPathname(pathname, routes);
+      const Page = routes[pathname];
+
+      if (!Page) return () => <div>404 - Page Not Found</div>;
+
       return () => (
         <WrapWithLayouts layouts={layouts}>
           <Page />
@@ -53,22 +59,53 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     };
 
     const clickHandler = (e: MouseEvent) => {
+      if (e.ctrlKey) return;
+
       const target = e.target as HTMLElement;
       const anchor = target.closest("a");
 
       if (anchor && anchor.href) {
         const url = new URL(anchor.href);
+        url.pathname = formatPathname(url.pathname);
 
         // Only handle internal links (same origin)
         if (url.origin === window.location.origin) {
+          // Handle hash-only links (anchors on the same page)
+          if (
+            url.pathname === window.location.pathname &&
+            url.search === window.location.search &&
+            url.hash
+          ) {
+            // Let the browser handle scrolling to the anchor
+            return;
+          }
+
           e.preventDefault();
 
           // Check if route exists
           if (routes[url.pathname]) {
-            // Update browser history
-            window.history.pushState(null, "", url.pathname);
+            // Update browser history with full URL including hash
+            window.history.pushState(
+              null,
+              "",
+              url.pathname + url.search + url.hash
+            );
             // Update current page
             setCurrentPage(createPage(window.location.pathname, routes));
+
+            // Handle hash scrolling after navigation
+            if (url.hash) {
+              // Use requestAnimationFrame to ensure the element is rendered
+              requestAnimationFrame(() => {
+                const element = document.getElementById(url.hash.slice(1));
+                if (element) {
+                  element.scrollIntoView({ behavior: "smooth" });
+                }
+              });
+            } else {
+              // Scroll to top if no hash
+              window.scrollTo(0, 0);
+            }
           }
         }
       }
@@ -83,5 +120,5 @@ export function RouterHost({ children }: { children: JSX.Element }) {
     };
   }, [routes, createPage]);
 
-  return CurrentPage;
+  return CurrentPage as unknown as JSX.Element;
 }
