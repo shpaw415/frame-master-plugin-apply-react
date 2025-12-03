@@ -4,7 +4,7 @@ import {
   type FrameMasterPlugin,
 } from "frame-master/plugin";
 import { join } from "path";
-import { version } from "../package.json";
+import { version, name } from "../package.json";
 
 /**
  * Configuration options for the Apply-React plugin
@@ -177,7 +177,7 @@ export default function applyReactPluginToHTML(
   ];
   const wsList: Bun.ServerWebSocket[] = [];
   return {
-    name: "apply-react",
+    name,
     version,
     build: {
       buildConfig: {
