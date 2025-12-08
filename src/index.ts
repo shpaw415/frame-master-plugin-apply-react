@@ -4,7 +4,7 @@ import {
   type FrameMasterPlugin,
 } from "frame-master/plugin";
 import { join } from "path";
-import { version } from "../package.json";
+import { version, name } from "../package.json";
 
 /**
  * Configuration options for the Apply-React plugin
@@ -40,6 +40,13 @@ export type ApplyReactPluginOptions = {
    * @default "hydrate"
    */
   hydration?: "hydrate" /* | "render"*/;
+
+  /**
+   * Set Custom entrypoints extensions
+   *
+   * @default [".tsx", ".jsx"]
+   */
+  entrypointExtensions?: string[];
 };
 
 function isJsFile(filePath: string) {
@@ -137,7 +144,7 @@ export default function applyReactPluginToHTML(
   const fileRouter = new Bun.FileSystemRouter({
     dir: join(cwd, route),
     style,
-    fileExtensions: [".tsx", ".jsx"],
+    fileExtensions: props.entrypointExtensions ?? [".tsx", ".jsx"],
   });
 
   async function reWriteHTMLFiles(
@@ -177,7 +184,7 @@ export default function applyReactPluginToHTML(
   ];
   const wsList: Bun.ServerWebSocket[] = [];
   return {
-    name: "apply-react",
+    name,
     version,
     build: {
       buildConfig: {
