@@ -320,14 +320,22 @@ export default function applyReactPluginToHTML(
                       ([key, value]) => `"${key}": ${value.defaultExport}`
                     )} }  `;
                   };
-                  return {
-                    contents: [
-                      ...Object.entries(parsedFileNames).map(([_, v]) => {
+
+                  const content = [
+                    ...Object.entries(parsedFileNames).map(([_, v]) => {
+                      if (
+                        [".tsx", ".jsx"].some((ext) => v.filePath.endsWith(ext))
+                      ) {
                         return `import {default as ${v.defaultExport}} from "original:${v.filePath}";`;
-                      }),
-                      toRouteObject(),
-                      `export default _ROUTES_;`,
-                    ].join("\n"),
+                      }
+                      return `import {default as ${v.defaultExport}} from "${v.filePath}";`;
+                    }),
+                    toRouteObject(),
+                    `export default _ROUTES_;`,
+                  ].join("\n");
+
+                  return {
+                    contents: content,
                     loader: args.loader,
                   };
                 }
