@@ -1,0 +1,22 @@
+{
+  "name": "test-project",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "frame-master": "3.0.1",
+    "frame-master-plugin-react-to-html": "^0.2.0"
+  },
+  "scripts": {
+    "dev": "NODE_ENV=development bun --hot frame-master dev",
+    "start": "NODE_ENV=production bun frame-master start",
+    "build": "NODE_ENV=production bun frame-master build",
+    "build:dev": "NODE_ENV=development bun frame-master build"
+  }
+}

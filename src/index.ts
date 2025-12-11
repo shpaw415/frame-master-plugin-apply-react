@@ -202,9 +202,10 @@ export default function applyReactPluginToHTML(
               // remove server-only module from client bundle
               build.onLoad(
                 {
-                  filter: /.*/,
+                  filter: /.*\.(ts|tsx|js|jsx)$/,
                 },
                 async (args) => {
+                  if (!(await Bun.file(args.path).exists())) return;
                   const isServerOnlyModule =
                     await directiveToolSingleton.pathIs(
                       "server-only",
@@ -234,6 +235,8 @@ export default function applyReactPluginToHTML(
 
                   splitedPath.push(`_${fileName}_.${ext}`);
 
+                  console.log(splitedPath.join("/"));
+
                   return {
                     namespace: "__ORIGINAL__",
                     path: splitedPath.join("/"),
@@ -259,7 +262,9 @@ export default function applyReactPluginToHTML(
                     `${fileName.slice(1, -1)}.${ext}`
                   );
 
-                  const fileContent = await Bun.file(realFilePath).text();
+                  const fileContent =
+                    args.__chainedContents ??
+                    (await Bun.file(realFilePath).text());
 
                   const isServerOnlyModule =
                     await directiveToolSingleton.pathIs(
@@ -333,7 +338,7 @@ export default function applyReactPluginToHTML(
                     toRouteObject(),
                     `export default _ROUTES_;`,
                   ].join("\n");
-
+                  console.log(args);
                   return {
                     contents: content,
                     loader: args.loader,
