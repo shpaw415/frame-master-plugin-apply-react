@@ -1,6 +1,6 @@
 {
   "name": "frame-master-plugin-apply-react",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.2",
