@@ -3,7 +3,7 @@ import {
   directiveToolSingleton,
   type FrameMasterPlugin,
 } from "frame-master/plugin";
-import { join } from "path";
+import path, { dirname, join } from "path";
 import { version, name } from "../package.json";
 
 /**
@@ -186,6 +186,34 @@ export default function applyReactPluginToHTML(
   return {
     name,
     version,
+    runtimePlugins: [
+      {
+        name: "virtual-entrypoints-loader",
+        setup(build) {
+          build.onResolve({ filter: /.*\/_.*_\.(jsx|tsx)$/ }, (args) => {
+            if (!args.path.startsWith(join(cwd, route))) return;
+
+            const pathArr = args.path.split(path.sep);
+            const name = pathArr.at(-1)?.split(".");
+            const ext = name?.pop();
+            const fileName = name?.join(".").slice(1, -1);
+            const realPath = join(dirname(args.path), `${fileName}.${ext}`);
+
+            return { path: realPath, namespace: "virtual-entrypoint" };
+          });
+          build.onLoad(
+            { filter: /.*/, namespace: "virtual-entrypoint" },
+            async (args) => {
+              return {
+                contents:
+                  args.__chainedContents ?? (await Bun.file(args.path).text()),
+                loader: args.__chainedLoader ?? args.loader ?? "tsx",
+              };
+            }
+          );
+        },
+      },
+    ],
     build: {
       buildConfig: {
         entrypoints: [
@@ -202,10 +230,9 @@ export default function applyReactPluginToHTML(
               // remove server-only module from client bundle
               build.onLoad(
                 {
-                  filter: /.*\.(ts|tsx|js|jsx)$/,
+                  filter: /.*/,
                 },
                 async (args) => {
-                  if (!(await Bun.file(args.path).exists())) return;
                   const isServerOnlyModule =
                     await directiveToolSingleton.pathIs(
                       "server-only",
@@ -235,8 +262,6 @@ export default function applyReactPluginToHTML(
 
                   splitedPath.push(`_${fileName}_.${ext}`);
 
-                  console.log(splitedPath.join("/"));
-
                   return {
                     namespace: "__ORIGINAL__",
                     path: splitedPath.join("/"),
@@ -262,9 +287,7 @@ export default function applyReactPluginToHTML(
                     `${fileName.slice(1, -1)}.${ext}`
                   );
 
-                  const fileContent =
-                    args.__chainedContents ??
-                    (await Bun.file(realFilePath).text());
+                  const fileContent = await Bun.file(realFilePath).text();
 
                   const isServerOnlyModule =
                     await directiveToolSingleton.pathIs(
@@ -278,8 +301,14 @@ export default function applyReactPluginToHTML(
                     };
                   }
                   return {
-                    contents: fileContent,
-                    loader: "tsx",
+                    contents: new Bun.Transpiler({
+                      loader: "tsx",
+                      autoImportJSX: true,
+                      deadCodeElimination: false,
+                      treeShaking: false,
+                      trimUnusedImports: false,
+                    }).transformSync(fileContent),
+                    loader: "js",
                   };
                 }
               );
@@ -338,7 +367,7 @@ export default function applyReactPluginToHTML(
                     toRouteObject(),
                     `export default _ROUTES_;`,
                   ].join("\n");
-                  console.log(args);
+
                   return {
                     contents: content,
                     loader: args.loader,
