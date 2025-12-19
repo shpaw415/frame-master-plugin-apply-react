@@ -5,6 +5,7 @@ import {
 } from "frame-master/plugin";
 import path, { dirname, join } from "path";
 import { version, name } from "../package.json";
+import { platform } from "os";
 
 declare global {
   var HMR_ENABLED: boolean;
@@ -286,7 +287,7 @@ export default function applyReactPluginToHTML(
                   const fileName = fileNameWithExt.split(".").shift()!;
 
                   const realFilePath = join(
-                    "/",
+                    platform() === "win32" ? "" : "/",
                     ...splitedPath,
                     `${fileName.slice(1, -1)}.${ext}`
                   );
@@ -341,6 +342,8 @@ export default function applyReactPluginToHTML(
                           "_"
                         )
                           .replaceAll(" ", "_")
+                          .replaceAll("\\", "_")
+                          .replaceAll(":", "_")
                           .replaceAll(".", "_")
                           .replaceAll("-", "_"),
                         filePath: fileRouter.routes[pathname]!,
