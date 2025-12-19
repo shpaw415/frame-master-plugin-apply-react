@@ -1,10 +1,8 @@
-/// <reference path="./ambient.d.ts" />
-
 import { StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
-import Shell from "client:shell";
+import Shell from "client-shell";
 import { getRelatedLayoutFromPathname } from "./layout";
-import _ROUTES_ from "routes/client:routes";
+import _ROUTES_ from "routes/client-routes";
 import { formatPathname } from "./utils";
 
 document.addEventListener("DOMContentLoaded", async () => {

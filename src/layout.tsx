@@ -1,6 +1,6 @@
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
-import type _ROUTES_ from "routes/client:routes";
+import type _ROUTES_ from "routes/client-routes";
 
 export function getRelatedLayoutFromPathname(
   pathname: string,

@@ -6,6 +6,10 @@ import {
 import path, { dirname, join } from "path";
 import { version, name } from "../package.json";
 
+declare global {
+  var HMR_ENABLED: boolean;
+}
+
 /**
  * Configuration options for the Apply-React plugin
  */
@@ -220,8 +224,8 @@ export default function applyReactPluginToHTML(
           ...(process.env.NODE_ENV === "production"
             ? []
             : [...ReactEntryPoints, ...DevReactEntryPoints]),
-          join("routes", "client:routes"),
-          join("apply-react", "client:hydrate"),
+          join("routes", "client-routes"),
+          join("apply-react", "client-hydrate"),
         ],
         plugins: [
           {
@@ -313,11 +317,11 @@ export default function applyReactPluginToHTML(
                 }
               );
 
-              build.onResolve({ filter: /client:shell/ }, (args) => {
+              build.onResolve({ filter: /client-shell/ }, (args) => {
                 return { path: pathToClientShell };
               });
 
-              build.onResolve({ filter: /^.*client:routes$/ }, (args) => {
+              build.onResolve({ filter: /^.*client-routes$/ }, (args) => {
                 return {
                   path: "client-routes",
                   namespace: "client-routes",
@@ -375,7 +379,7 @@ export default function applyReactPluginToHTML(
                 }
               );
 
-              build.onResolve({ filter: /.*client:hydrate$/ }, (args) => {
+              build.onResolve({ filter: /.*client-hydrate$/ }, (args) => {
                 return { path: pathToHydrate, namespace: "client-hydrate" };
               });
               build.onLoad(

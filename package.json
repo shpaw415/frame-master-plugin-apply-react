@@ -1,6 +1,6 @@
 {
   "name": "frame-master-plugin-apply-react",
-  "version": "1.0.0",
+  "version": "0.2.2",
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.7",
@@ -14,6 +14,7 @@
   },
   "exports": {
     "./plugin": "./src/index.ts",
-    "./router": "./src/router.tsx"
+    "./router": "./src/router.tsx",
+    "./types": "./src/types.d.ts"
   }
 }

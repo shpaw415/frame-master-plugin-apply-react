@@ -24,7 +24,8 @@
     // Some stricter flags (disabled by default)
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    "noPropertyAccessFromIndexSignature": false,
+    "types": ["./src/types.d.ts"]
   },
-  "include": ["src/**/*", "./**/*.d.ts"]
+  "include": ["src"]
 }

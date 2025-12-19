@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
-import _ROUTES_ from "routes/client:routes";
+import _ROUTES_ from "routes/client-routes";
 import { formatPathname } from "./utils";
 
 /**
