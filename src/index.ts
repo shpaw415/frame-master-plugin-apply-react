@@ -137,6 +137,7 @@ export default function applyReactPluginToHTML(
     style,
     route,
     enableHMR = process.env.NODE_ENV != "production",
+    entrypointExtensions = [".tsx", ".jsx"],
   } = props;
   process.env.PUBLIC_HMR_ENABLED = enableHMR ? "true" : "false";
   const cwd = process.cwd();
@@ -149,7 +150,7 @@ export default function applyReactPluginToHTML(
   const fileRouter = new Bun.FileSystemRouter({
     dir: join(cwd, route),
     style,
-    fileExtensions: props.entrypointExtensions ?? [".tsx", ".jsx"],
+    fileExtensions: entrypointExtensions,
   });
 
   async function reWriteHTMLFiles(
@@ -195,17 +196,28 @@ export default function applyReactPluginToHTML(
       {
         name: "virtual-entrypoints-loader",
         setup(build) {
-          build.onResolve({ filter: /.*\/_.*_\.(jsx|tsx)$/ }, (args) => {
-            if (!args.path.startsWith(join(cwd, route))) return;
+          build.onResolve(
+            {
+              filter: new RegExp(
+                `.*\/_.*_\.(${
+                  props.entrypointExtensions
+                    ?.map((ext) => ext.slice(1))
+                    .join("|") ?? "tsx|jsx"
+                })$`
+              ),
+            },
+            (args) => {
+              if (!args.path.startsWith(join(cwd, route))) return;
 
-            const pathArr = args.path.split(path.sep);
-            const name = pathArr.at(-1)?.split(".");
-            const ext = name?.pop();
-            const fileName = name?.join(".").slice(1, -1);
-            const realPath = join(dirname(args.path), `${fileName}.${ext}`);
+              const pathArr = args.path.split(path.sep);
+              const name = pathArr.at(-1)?.split(".");
+              const ext = name?.pop();
+              const fileName = name?.join(".").slice(1, -1);
+              const realPath = join(dirname(args.path), `${fileName}.${ext}`);
 
-            return { path: realPath, namespace: "virtual-entrypoint" };
-          });
+              return { path: realPath, namespace: "virtual-entrypoint" };
+            }
+          );
           build.onLoad(
             { filter: /.*/, namespace: "virtual-entrypoint" },
             async (args) => {
