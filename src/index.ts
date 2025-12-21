@@ -165,18 +165,18 @@ export default function applyReactPluginToHTML(
 
     const rewriter = new HTMLRewriter().on("head", {
       element(element) {
-        [`<script src="${hydratePath}" type="module"></script>`].forEach(
-          (injectElement) => element.append(injectElement, { html: true })
-        );
+        element.append(`<script src="${hydratePath}" type="module"></script>`, {
+          html: true,
+        });
       },
     });
     await Promise.all(
       result.outputs
         .filter((output) => output.path.endsWith(".html"))
         .map(async (file) => {
-          return Bun.file(file.path).write(
-            rewriter.transform(await file.text())
-          );
+          const contents = await Bun.file(file.path).text();
+          const rewritten = rewriter.transform(contents);
+          return Bun.file(file.path).write(rewritten);
         })
     );
   }
@@ -199,11 +199,9 @@ export default function applyReactPluginToHTML(
           build.onResolve(
             {
               filter: new RegExp(
-                `.*\/_.*_\.(${
-                  props.entrypointExtensions
-                    ?.map((ext) => ext.slice(1))
-                    .join("|") ?? "tsx|jsx"
-                })$`
+                `.*\/_.*_\.(${entrypointExtensions
+                  ?.map((ext) => ext.slice(1))
+                  .join("|")})$`
               ),
             },
             (args) => {
@@ -404,13 +402,12 @@ export default function applyReactPluginToHTML(
                   loader: "tsx",
                 })
               );
-
-              build.onEnd(async (result) => {
-                await reWriteHTMLFiles(result, build.config);
-              });
             },
           },
         ],
+      },
+      afterBuild(buildConfig, result, builder) {
+        return reWriteHTMLFiles(result, buildConfig);
       },
     },
     serverConfig: {
