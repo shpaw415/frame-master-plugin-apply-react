@@ -30,7 +30,7 @@ export function setupHMR(
     switch (message) {
       case "update-routes":
         const newRoutes = (
-          await import(`/routes/client:routes.js?t=${Date.now()}`)
+          await import(`/routes/client-routes.js?t=${Date.now()}`)
         ).default;
         await onRoutesUpdate(newRoutes);
         break;
