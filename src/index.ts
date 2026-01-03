@@ -207,7 +207,9 @@ export default function applyReactPluginToHTML(
             (args) => {
               if (!args.path.startsWith(join(cwd, route))) return;
 
-              const pathArr = args.path.split(path.sep);
+              const _path = args.path.split("?")[0]!;
+
+              const pathArr = _path.split(path.sep);
               const name = pathArr.at(-1)?.split(".");
               const ext = name?.pop();
               const fileName = name?.join(".").slice(1, -1);
