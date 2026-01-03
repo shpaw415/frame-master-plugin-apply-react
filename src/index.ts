@@ -207,9 +207,7 @@ export default function applyReactPluginToHTML(
             (args) => {
               if (!args.path.startsWith(join(cwd, route))) return;
 
-              const _path = args.path.split("?")[0]!;
-
-              const pathArr = _path.split(path.sep);
+              const pathArr = args.path.split(path.sep);
               const name = pathArr.at(-1)?.split(".");
               const ext = name?.pop();
               const fileName = name?.join(".").slice(1, -1);
@@ -221,9 +219,12 @@ export default function applyReactPluginToHTML(
           build.onLoad(
             { filter: /.*/, namespace: "virtual-entrypoint" },
             async (args) => {
+              const removedQueryPath = args.path.split("?").at(0)!;
+
               return {
                 contents:
-                  args.__chainedContents ?? (await Bun.file(args.path).text()),
+                  args.__chainedContents ??
+                  (await Bun.file(removedQueryPath).text()),
                 loader: args.__chainedLoader ?? args.loader ?? "tsx",
               };
             }
