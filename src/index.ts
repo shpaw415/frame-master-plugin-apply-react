@@ -201,7 +201,7 @@ export default function applyReactPluginToHTML(
               filter: new RegExp(
                 `.*\/_.*_\.(${entrypointExtensions
                   ?.map((ext) => ext.slice(1))
-                  .join("|")})$`
+                  .join("|")})(\\?.*)?$`
               ),
             },
             (args) => {
