@@ -6,6 +6,7 @@ import {
 import path, { dirname, join } from "path";
 import { version, name } from "../package.json";
 import { platform } from "os";
+import { isProd } from "frame-master/utils";
 
 declare global {
   var HMR_ENABLED: boolean;
@@ -52,6 +53,12 @@ export type ApplyReactPluginOptions = {
    * @default [".tsx", ".jsx"]
    */
   entrypointExtensions?: string[];
+
+  /**
+   * Auto import Hydrate. `<script src="/apply-react/client-hydrate"></script>` in HTML head
+   * @default true
+   */
+  autoImportHydrate?: boolean;
 };
 
 function isJsFile(filePath: string) {
@@ -138,6 +145,7 @@ export default function applyReactPluginToHTML(
     route,
     enableHMR = process.env.NODE_ENV != "production",
     entrypointExtensions = [".tsx", ".jsx"],
+    autoImportHydrate = true,
   } = props;
   process.env.PUBLIC_HMR_ENABLED = enableHMR ? "true" : "false";
   const cwd = process.cwd();
@@ -181,8 +189,9 @@ export default function applyReactPluginToHTML(
     );
   }
 
-  const ReactEntryPoints = ["react", "react-dom"];
   const DevReactEntryPoints = [
+    "react",
+    "react-dom",
     "node_modules/react/cjs/react-jsx-dev-runtime.development.js",
     "node_modules/react/jsx-dev-runtime.js",
     "node_modules/react/cjs/react.development.js",
@@ -235,11 +244,7 @@ export default function applyReactPluginToHTML(
     build: {
       buildConfig: {
         entrypoints: [
-          ...(process.env.NODE_ENV === "production"
-            ? []
-            : [
-                /*...ReactEntryPoints, ...DevReactEntryPoints*/
-              ]),
+          ...(isProd() ? [] : DevReactEntryPoints),
           join("routes", "client-routes"),
           join("apply-react", "client-hydrate"),
         ],
@@ -408,28 +413,27 @@ export default function applyReactPluginToHTML(
                 })
               );
 
-              const htmlrewriter = new HTMLRewriter().on("head", {
-                element(element) {
-                  element.append(
-                    `<script src="/apply-react/client-hydrate" type="module" id="__hydrate_script__"></script>`,
-                    {
-                      html: true,
-                    }
-                  );
-                },
-              });
-              build.finally("html", ({ contents }) => {
-                return {
-                  contents: htmlrewriter.transform(contents as string),
-                };
-              });
+              if (autoImportHydrate) {
+                const htmlrewriter = new HTMLRewriter().on("head", {
+                  element(element) {
+                    element.append(
+                      `<script src="/apply-react/client-hydrate" type="module" id="__hydrate_script__"></script>`,
+                      {
+                        html: true,
+                      }
+                    );
+                  },
+                });
+                build.finally("html", ({ contents }) => {
+                  return {
+                    contents: htmlrewriter.transform(contents as string),
+                  };
+                });
+              }
             },
           },
         ],
       },
-      /*afterBuild(buildConfig, result, builder) {
-        return reWriteHTMLFiles(result, buildConfig);
-      },*/
     },
     serverConfig: {
       routes: {
@@ -469,26 +473,28 @@ export default function applyReactPluginToHTML(
           HMR_ENABLED: process.env.NODE_ENV == "production" ? false : true,
         });
       },
-      html_rewrite: {
-        rewrite(reWriter, master, context) {
-          reWriter
-            .on("head", {
-              element(element) {
-                element.append(
-                  `<script src="/apply-react/client-hydrate.js" type="module"></script>`,
-                  {
-                    html: true,
-                  }
-                );
-              },
-            })
-            .on("script#__hydrate_script__", {
-              element(element) {
-                element.remove();
-              },
-            });
-        },
-      },
+      html_rewrite: autoImportHydrate
+        ? {
+            rewrite(reWriter, master, context) {
+              reWriter
+                .on("head", {
+                  element(element) {
+                    element.append(
+                      `<script src="/apply-react/client-hydrate.js" type="module"></script>`,
+                      {
+                        html: true,
+                      }
+                    );
+                  },
+                })
+                .on("script#__hydrate_script__", {
+                  element(element) {
+                    element.remove();
+                  },
+                });
+            },
+          }
+        : {},
     },
   };
 }
