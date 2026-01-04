@@ -58,7 +58,12 @@ export type ApplyReactPluginOptions = {
    * Auto import Hydrate. `<script src="/apply-react/client-hydrate"></script>` in HTML head
    * @default true
    */
-  autoImportHydrate?: boolean;
+  autoImportHydrateOnBuild?: boolean;
+  /**
+   * Auto import Hydrate. Inject `<script src="/apply-react/client-hydrate.js"></script>` in HTML head on each HTML request
+   * @default false
+   */
+  autoImportHydrateOnRequest?: boolean;
 };
 
 function isJsFile(filePath: string) {
@@ -145,7 +150,8 @@ export default function applyReactPluginToHTML(
     route,
     enableHMR = process.env.NODE_ENV != "production",
     entrypointExtensions = [".tsx", ".jsx"],
-    autoImportHydrate = true,
+    autoImportHydrateOnBuild = true,
+    autoImportHydrateOnRequest = false,
   } = props;
   process.env.PUBLIC_HMR_ENABLED = enableHMR ? "true" : "false";
   const cwd = process.cwd();
@@ -160,34 +166,6 @@ export default function applyReactPluginToHTML(
     style,
     fileExtensions: entrypointExtensions,
   });
-
-  async function reWriteHTMLFiles(
-    result: Bun.BuildOutput,
-    buildConfig: Bun.BuildConfig
-  ) {
-    const hydratePath = result.outputs
-      .find((output) => output.path.endsWith("hydrate.js"))
-      ?.path.replace(join(cwd, buildConfig.outdir!), "");
-
-    if (!hydratePath) return;
-
-    const rewriter = new HTMLRewriter().on("head", {
-      element(element) {
-        element.append(`<script src="${hydratePath}" type="module"></script>`, {
-          html: true,
-        });
-      },
-    });
-    await Promise.all(
-      result.outputs
-        .filter((output) => output.path.endsWith(".html"))
-        .map(async (file) => {
-          const contents = await Bun.file(file.path).text();
-          const rewritten = rewriter.transform(contents);
-          return Bun.file(file.path).write(rewritten);
-        })
-    );
-  }
 
   const DevReactEntryPoints = [
     "react",
@@ -413,7 +391,7 @@ export default function applyReactPluginToHTML(
                 })
               );
 
-              if (autoImportHydrate) {
+              if (autoImportHydrateOnBuild) {
                 const htmlrewriter = new HTMLRewriter().on("head", {
                   element(element) {
                     element.append(
@@ -473,7 +451,7 @@ export default function applyReactPluginToHTML(
           HMR_ENABLED: process.env.NODE_ENV == "production" ? false : true,
         });
       },
-      html_rewrite: autoImportHydrate
+      html_rewrite: autoImportHydrateOnRequest
         ? {
             rewrite(reWriter, master, context) {
               reWriter
