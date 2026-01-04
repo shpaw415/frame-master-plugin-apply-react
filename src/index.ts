@@ -237,7 +237,9 @@ export default function applyReactPluginToHTML(
         entrypoints: [
           ...(process.env.NODE_ENV === "production"
             ? []
-            : [...ReactEntryPoints, ...DevReactEntryPoints]),
+            : [
+                /*...ReactEntryPoints, ...DevReactEntryPoints*/
+              ]),
           join("routes", "client-routes"),
           join("apply-react", "client-hydrate"),
         ],
