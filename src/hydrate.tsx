@@ -5,7 +5,13 @@ import { getRelatedLayoutFromPathname } from "./layout";
 import _ROUTES_ from "routes/client-routes";
 import { formatPathname } from "./utils";
 
-document.addEventListener("DOMContentLoaded", async () => {
+if (document.readyState !== "loading") {
+  Hydrate();
+} else {
+  document.addEventListener("DOMContentLoaded", Hydrate);
+}
+
+async function Hydrate() {
   const rootElement = document.getElementById("root");
   if (rootElement) {
     const pathname = formatPathname(window.location.pathname);
@@ -27,4 +33,4 @@ document.addEventListener("DOMContentLoaded", async () => {
       </StrictMode>
     );
   }
-});
+}
