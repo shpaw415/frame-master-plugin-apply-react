@@ -405,13 +405,29 @@ export default function applyReactPluginToHTML(
                   loader: "tsx",
                 })
               );
+
+              const htmlrewriter = new HTMLRewriter().on("head", {
+                element(element) {
+                  element.append(
+                    `<script src="/apply-react/client-hydrate" type="module" id="__hydrate_script__"></script>`,
+                    {
+                      html: true,
+                    }
+                  );
+                },
+              });
+              build.finally("html", ({ contents }) => {
+                return {
+                  contents: htmlrewriter.transform(contents as string),
+                };
+              });
             },
           },
         ],
       },
-      afterBuild(buildConfig, result, builder) {
+      /*afterBuild(buildConfig, result, builder) {
         return reWriteHTMLFiles(result, buildConfig);
-      },
+      },*/
     },
     serverConfig: {
       routes: {
@@ -450,6 +466,26 @@ export default function applyReactPluginToHTML(
         master.setGlobalValues({
           HMR_ENABLED: process.env.NODE_ENV == "production" ? false : true,
         });
+      },
+      html_rewrite: {
+        rewrite(reWriter, master, context) {
+          reWriter
+            .on("head", {
+              element(element) {
+                element.append(
+                  `<script src="/apply-react/client-hydrate.js" type="module"></script>`,
+                  {
+                    html: true,
+                  }
+                );
+              },
+            })
+            .on("script#__hydrate_script__", {
+              element(element) {
+                element.remove();
+              },
+            });
+        },
       },
     },
   };
