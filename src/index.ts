@@ -412,6 +412,11 @@ export default function applyReactPluginToHTML(
           },
         ],
       },
+      afterBuild() {
+        wsList.forEach((ws) => {
+          ws.send("update-routes");
+        });
+      },
     },
     serverConfig: {
       routes: {
@@ -439,11 +444,7 @@ export default function applyReactPluginToHTML(
     onFileSystemChange(event, filepath, absolutePath) {
       if (!absolutePath.startsWith(join(cwd, route)) || builder?.isBuilding())
         return;
-      builder?.build().then(() => {
-        wsList.forEach((ws) => {
-          ws.send("update-routes");
-        });
-      });
+      builder?.build();
     },
     router: {
       before_request(master) {
