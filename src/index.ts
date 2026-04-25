@@ -195,9 +195,6 @@ export default function applyReactPluginToHTML(
 				],
 			},
 			afterBuild() {
-				console.log(
-					`[apply-react] Build completed. updating ${wsList.length} connected clients...`,
-				);
 				wsList.forEach((ws) => {
 					ws.send("update-routes");
 				});
@@ -230,11 +227,6 @@ export default function applyReactPluginToHTML(
 		},
 		fileSystemWatchDir: enableHMR ? [route] : undefined,
 		onFileSystemChange(_ev, _fp, absolutePath) {
-			console.log(`[apply-react]`, {
-				absolutePath,
-				route,
-				builderIsBuilding: getBuilder()?.isBuilding(),
-			});
 			if (!absolutePath.startsWith(route) || getBuilder()?.isBuilding()) return;
 			getBuilder()?.build();
 		},
