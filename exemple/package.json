@@ -11,7 +11,7 @@
 	},
 	"dependencies": {
 		"frame-master": "^3.1.3",
-		"frame-master-plugin-apply-react": "link:frame-master-plugin-apply-react",
+		"frame-master-plugin-apply-react": "https://github.com/shpaw415/frame-master-plugin-apply-react.git#refactor",
 		"frame-master-plugin-serve-from-build": "^1.0.0"
 	},
 	"scripts": {

@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "apply-react",
+      "dependencies": {
+        "frame-master-plugin-apply-react": "^0.2.6",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.13",
         "@types/react": "^19.2.7",
@@ -43,6 +46,8 @@
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 
     "frame-master": ["frame-master@3.1.3", "", { "dependencies": { "@shpaw415/webtoken": "^2.0.0", "@types/git": "^0.0.21", "chalk": "^5.6.2", "commander": "^14.0.2", "git": "^0.1.5", "react": "^19.2.3", "react-dom": "^19.2.3", "tar": "^7.5.2" }, "peerDependencies": { "typescript": "^6.0.3" }, "bin": { "frame-master": "bin/index.ts" } }, "sha512-OL5fUxtlQjrVXkyv187l2bSGfcORz4AGX1oHS5BK/YYe4I/7ulISrCxLf7I3unekTAACDU1K3iwKHCoPvqWm2Q=="],
+
+    "frame-master-plugin-apply-react": ["frame-master-plugin-apply-react@0.2.6", "", { "peerDependencies": { "frame-master": "^3.0.1", "react": "^19.2.0", "react-dom": "^19.2.0", "typescript": "^5.9.3" } }, "sha512-AC6C5+TWTAR1ptm134kf/Oohqohp4Q2jeEIF8+OT/ehg/6pRl+lRDQyy9N2b3KA3/IpYKzSUi/gU2D2i4Mhc0g=="],
 
     "git": ["git@0.1.5", "", { "dependencies": { "mime": "1.2.9" } }, "sha512-N+bfOrXyKMU/fQtCj6D/U9MQOEN0DAA8TLHSLdUQRSWBOkeRvsjJHdrdkvcq05xO7GSDKWc3nDEGoTZ4DfCCSg=="],
 

@@ -17,5 +17,8 @@
 		"./router": "./src/router.tsx",
 		"./types": "./src/types.d.ts",
 		"./utils": "./src/utils.ts"
+	},
+	"dependencies": {
+		"frame-master-plugin-apply-react": "^0.2.6"
 	}
 }
