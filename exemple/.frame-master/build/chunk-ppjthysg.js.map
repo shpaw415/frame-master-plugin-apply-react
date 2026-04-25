@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../src/HMR.ts"],
+  "sourcesContent": [
+    "import type { JSX } from \"react\";\n\nlet ws: WebSocket;\n\nfunction initializeWebSocket() {\n\tif (ws) return;\n\tws = new WebSocket(`ws://${window.location.host}/_REACT_HMR/ws`);\n}\n\n/**\n * Initializes Hot Module Replacement for client-side route updates.\n *\n * @features\n * - Establishes WebSocket connection to the HMR server\n * - Automatically reloads routes when file changes are detected\n * - Updates global route registry without full page refresh\n * - Provides cleanup mechanism for proper resource management\n *\n * @param onRoutesUpdate - Callback invoked when routes are updated\n * @returns A cleanup function to remove the HMR listener\n */\nexport function setupHMR(\n\tonRoutesUpdate: (\n\t\troutes: Record<string, () => JSX.Element>,\n\t) => Promise<void> | void,\n) {\n\tinitializeWebSocket();\n\tconst handleMessage = async (event: MessageEvent) => {\n\t\tconst message = event.data as \"update-routes\";\n\t\tlet newRoutes: Record<string, () => JSX.Element>;\n\t\tswitch (message) {\n\t\t\tcase \"update-routes\":\n\t\t\t\tnewRoutes = (\n\t\t\t\t\tawait import(`/@apply-react/client-routes.js?t=${Date.now()}`)\n\t\t\t\t).default;\n\t\t\t\tawait onRoutesUpdate(newRoutes);\n\t\t\t\tbreak;\n\t\t\tdefault:\n\t\t\t\tbreak;\n\t\t}\n\t};\n\n\tws.addEventListener(\"message\", handleMessage);\n\treturn () => {\n\t\tws.removeEventListener(\"message\", handleMessage);\n\t};\n}\n"
+  ],
+  "mappings": ";AAEA,IAAI;AAEJ,SAAS,mBAAmB,GAAG;AAAA,EAC9B,IAAI;AAAA,IAAI;AAAA,EACR,KAAK,IAAI,UAAU,QAAQ,OAAO,SAAS,oBAAoB;AAAA;AAezD,SAAS,QAAQ,CACvB,gBAGC;AAAA,EACD,oBAAoB;AAAA,EACpB,MAAM,gBAAgB,OAAO,UAAwB;AAAA,IACpD,MAAM,UAAU,MAAM;AAAA,IACtB,IAAI;AAAA,IACJ,QAAQ;AAAA,WACF;AAAA,QACJ,aACC,MAAa,2CAAoC,KAAK,IAAI,MACzD;AAAA,QACF,MAAM,eAAe,SAAS;AAAA,QAC9B;AAAA;AAAA,QAEA;AAAA;AAAA;AAAA,EAIH,GAAG,iBAAiB,WAAW,aAAa;AAAA,EAC5C,OAAO,MAAM;AAAA,IACZ,GAAG,oBAAoB,WAAW,aAAa;AAAA;AAAA;",
+  "debugId": "492339F7D326B52064756E2164756E21",
+  "names": []
+}

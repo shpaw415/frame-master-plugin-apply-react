@@ -1,12 +1,9 @@
-import { builder } from "frame-master/build";
-import {
-	directiveToolSingleton,
-	type FrameMasterPlugin,
-} from "frame-master/plugin";
-import path, { dirname, join } from "node:path";
-import { version, name } from "../package.json";
-import { platform } from "node:os";
+import { join } from "node:path";
+import { getBuilder } from "frame-master/build";
+import type { FrameMasterPlugin } from "frame-master/plugin";
+import { directiveManager } from "frame-master/utils";
 import { isProd } from "frame-master/utils";
+import { name, version } from "../package.json";
 
 declare global {
 	var HMR_ENABLED: boolean;
@@ -53,17 +50,6 @@ export type ApplyReactPluginOptions = {
 	 * @default [".tsx", ".jsx"]
 	 */
 	entrypointExtensions?: string[];
-
-	/**
-	 * Auto import Hydrate. `<script src="/apply-react/client-hydrate"></script>` in HTML head
-	 * @default true
-	 */
-	autoImportHydrateOnBuild?: boolean;
-	/**
-	 * Auto import Hydrate. Inject `<script src="/apply-react/client-hydrate.js"></script>` in HTML head on each HTML request
-	 * @default false
-	 */
-	autoImportHydrateOnRequest?: boolean;
 };
 
 /**
@@ -110,12 +96,9 @@ export default function applyReactPluginToHTML(
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
 		entrypointExtensions = [".tsx", ".jsx"],
-		autoImportHydrateOnBuild = true,
-		autoImportHydrateOnRequest = false,
 	} = props;
 	process.env.PUBLIC_HMR_ENABLED = enableHMR ? "true" : "false";
 	const cwd = process.cwd();
-	const pathToHydrate = join(`${import.meta.dir}`, "hydrate.tsx");
 
 	const pathToClientShell = props.clientShellPath
 		? join(cwd, props.clientShellPath)
@@ -139,240 +122,82 @@ export default function applyReactPluginToHTML(
 	return {
 		name,
 		version,
-		runtimePlugins: [
-			{
-				name: "virtual-entrypoints-loader",
-				setup(build) {
-					build.onResolve(
-						{
-							filter: new RegExp(
-								`.*\/_.*_\.(${entrypointExtensions
-									?.map((ext) => ext.slice(1))
-									.join("|")})(\\?.*)?$`,
-							),
-						},
-						(args) => {
-							if (!args.path.startsWith(join(cwd, route))) return;
-
-							const pathArr = args.path.split(path.sep);
-							const name = pathArr.at(-1)?.split(".");
-							const ext = name?.pop();
-							const fileName = name?.join(".").slice(1, -1);
-							const realPath = join(dirname(args.path), `${fileName}.${ext}`);
-
-							return { path: realPath, namespace: "virtual-entrypoint" };
-						},
-					);
-					build.onLoad(
-						{ filter: /.*/, namespace: "virtual-entrypoint" },
-						async (args) => {
-							const removedQueryPath = args.path.split("?").at(0)!;
-
-							return {
-								contents:
-									args.__chainedContents ??
-									(await Bun.file(removedQueryPath).text()),
-								loader: args.__chainedLoader ?? args.loader ?? "tsx",
-							};
-						},
-					);
-				},
-			},
-		],
 		build: {
 			buildConfig: {
 				entrypoints: [
 					...(isProd() ? [] : DevReactEntryPoints),
-					join("routes", "client-routes"),
-					join("apply-react", "client-hydrate"),
+					"@apply-react/client-routes.ts",
+					"@apply-react/client-hydrate.tsx",
+					"@apply-react/HMR.ts",
+					"@apply-react/client-shell.tsx",
 				],
+				files: {
+					"@apply-react/client-routes.ts": `
+          ${Object.entries(fileRouter.routes)
+						.map(
+							([_pathname, filePath], index) =>
+								`import _${index} from "${filePath}";`,
+						)
+						.join("\n")}
+          export default { ${Object.entries(fileRouter.routes)
+						.map(([pathname, _fp], index) => `"${pathname}": _${index}`)
+						.join(",\n")} };
+          `,
+					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}"`,
+					"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}"`,
+					"@apply-react/client-shell.tsx": `
+          export { default } from "${pathToClientShell}";
+          `,
+				},
 				plugins: [
 					{
 						name: "apply-routes-to-hydrate",
 						setup(build) {
-							// remove server-only module from client bundle
-							build.onLoad(
-								{
-									filter: /.*/,
-								},
-								async (args) => {
-									const isServerOnlyModule =
-										await directiveToolSingleton.pathIs(
-											"server-only",
-											args.path,
-										);
-									if (isServerOnlyModule) {
-										return {
-											contents: "",
-											loader: "js",
-										};
-									}
-								},
-							);
-							// get the original file instead of the parsed file from other plugins
-							build.onResolve(
-								{
-									filter: /^original:\.*/,
-								},
-								(args) => {
-									const realPath = args.path.replace("original:", "");
-
-									const ext = realPath.split(".").pop()!;
-
-									const splitedPath = realPath.split("/");
-
-									const fileName = splitedPath.pop()?.split(".").shift()!;
-
-									splitedPath.push(`_${fileName}_.${ext}`);
-
+							build.onLoad({ filter: /.*/ }, async (args) => {
+								if (await directiveManager.pathIs("server-only", args.path)) {
 									return {
-										namespace: "__ORIGINAL__",
-										path: splitedPath.join("/"),
-									};
-								},
-							);
-
-							build.onLoad(
-								{
-									filter: /.*/,
-									namespace: "__ORIGINAL__",
-								},
-								async (args) => {
-									const splitedPath = args.path.split("/");
-									const fileNameWithExt = splitedPath.pop()!;
-
-									const ext = fileNameWithExt.split(".").pop()!;
-									const fileName = fileNameWithExt.split(".").shift()!;
-
-									const realFilePath = join(
-										platform() === "win32" ? "" : "/",
-										...splitedPath,
-										`${fileName.slice(1, -1)}.${ext}`,
-									);
-
-									const fileContent = await Bun.file(realFilePath).text();
-
-									const isServerOnlyModule =
-										await directiveToolSingleton.pathIs(
-											"server-only",
-											realFilePath,
-										);
-									if (isServerOnlyModule) {
-										return {
-											loader: realFilePath.split(".").pop() as Bun.Loader,
-											...toEmptyFileFromFilePath(realFilePath),
-										};
-									}
-									return {
-										contents: new Bun.Transpiler({
-											loader: "tsx",
-											autoImportJSX: true,
-											deadCodeElimination: false,
-											treeShaking: false,
-											trimUnusedImports: false,
-										}).transformSync(fileContent),
+										contents: "",
 										loader: "js",
 									};
-								},
-							);
-
-							build.onResolve({ filter: /client-shell/ }, (args) => {
-								return { path: pathToClientShell };
+								}
 							});
 
-							build.onResolve({ filter: /^.*client-routes$/ }, (args) => {
+							const htmlrewriter = new HTMLRewriter().on("head", {
+								element(element) {
+									element.append(
+										`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
+										{
+											html: true,
+										},
+									);
+									element.append(
+										`<script>
+                      globalThis.HMR_ENABLED = ${enableHMR ? "true" : "false"};
+                    </script>`,
+										{
+											html: true,
+										},
+									);
+								},
+							});
+
+							build.onLoad({ filter: /\.html$/ }, async (args) => {
+								const contents =
+									args.__chainedContents ?? (await Bun.file(args.path).text());
+								const transformed = htmlrewriter.transform(contents as string);
+
 								return {
-									path: "client-routes",
-									namespace: "client-routes",
+									contents: transformed,
 								};
 							});
-							build.onLoad(
-								{ filter: /.*/, namespace: "client-routes" },
-								async (args) => {
-									const routePathname = Object.keys(fileRouter.routes);
-
-									const parsedFileNames = Object.assign(
-										{},
-										...routePathname.map((pathname) => ({
-											[pathname]: {
-												defaultExport: fileRouter.routes[pathname]!.replaceAll(
-													"/",
-													"_",
-												)
-													.replaceAll(" ", "_")
-													.replaceAll("\\", "_")
-													.replaceAll(":", "_")
-													.replaceAll(".", "_")
-													.replaceAll("-", "_"),
-												filePath: fileRouter.routes[pathname]!,
-											},
-										})),
-									) as Record<
-										string,
-										{ filePath: string; defaultExport: string }
-									>;
-
-									const toRouteObject = () => {
-										return `const _ROUTES_ = { ${Object.entries(
-											parsedFileNames,
-										).map(
-											([key, value]) => `"${key}": ${value.defaultExport}`,
-										)} }  `;
-									};
-
-									const content = [
-										...Object.entries(parsedFileNames).map(([_, v]) => {
-											if (
-												[".tsx", ".jsx"].some((ext) => v.filePath.endsWith(ext))
-											) {
-												return `import {default as ${v.defaultExport}} from "original:${v.filePath}";`;
-											}
-											return `import {default as ${v.defaultExport}} from "${v.filePath}";`;
-										}),
-										toRouteObject(),
-										`export default _ROUTES_;`,
-									].join("\n");
-
-									return {
-										contents: content,
-										loader: args.loader,
-									};
-								},
-							);
-
-							build.onResolve({ filter: /.*client-hydrate$/ }, (args) => {
-								return { path: pathToHydrate, namespace: "client-hydrate" };
-							});
-							build.onLoad(
-								{ filter: /.*/, namespace: "client-hydrate" },
-								async (args) => ({
-									contents: await Bun.file(args.path).text(),
-									loader: "tsx",
-								}),
-							);
-
-							if (autoImportHydrateOnBuild) {
-								const htmlrewriter = new HTMLRewriter().on("head", {
-									element(element) {
-										element.append(
-											`<script src="/apply-react/client-hydrate" type="module" id="__hydrate_script__"></script>`,
-											{
-												html: true,
-											},
-										);
-									},
-								});
-								build.finally("html", ({ contents }) => {
-									return {
-										contents: htmlrewriter.transform(contents as string),
-									};
-								});
-							}
 						},
 					},
 				],
 			},
 			afterBuild() {
+				console.log(
+					`[apply-react] Build completed. updating ${wsList.length} connected clients...`,
+				);
 				wsList.forEach((ws) => {
 					ws.send("update-routes");
 				});
@@ -382,7 +207,10 @@ export default function applyReactPluginToHTML(
 			routes: {
 				"/_REACT_HMR/ws": enableHMR
 					? (req, server) =>
-							server.upgrade(req, { data: { react_hmr: true } as any })
+							(server as unknown as Bun.Server<{ react_hmr: boolean }>).upgrade(
+								req,
+								{ data: { react_hmr: true } },
+							)
 								? new Response("ws upgraded", { status: 101 })
 								: new Response("upgrade failed", { status: 400 })
 					: new Response("HMR disabled", { status: 503 }),
@@ -400,40 +228,42 @@ export default function applyReactPluginToHTML(
 				}
 			},
 		},
-		fileSystemWatchDir: enableHMR ? [join(cwd, route)] : undefined,
-		onFileSystemChange(event, filepath, absolutePath) {
-			if (!absolutePath.startsWith(join(cwd, route)) || builder?.isBuilding())
-				return;
-			builder?.build();
+		fileSystemWatchDir: enableHMR ? [route] : undefined,
+		onFileSystemChange(_ev, _fp, absolutePath) {
+			console.log(`[apply-react]`, {
+				absolutePath,
+				route,
+				builderIsBuilding: getBuilder()?.isBuilding(),
+			});
+			if (!absolutePath.startsWith(route) || getBuilder()?.isBuilding()) return;
+			getBuilder()?.build();
 		},
 		router: {
 			before_request(master) {
 				master.setGlobalValues({
-					HMR_ENABLED: process.env.NODE_ENV == "production" ? false : true,
+					HMR_ENABLED: process.env.NODE_ENV === "development",
 				});
 			},
-			html_rewrite: autoImportHydrateOnRequest
-				? {
-						rewrite(reWriter, master, context) {
-							reWriter
-								.on("head", {
-									element(element) {
-										element.append(
-											`<script src="/apply-react/client-hydrate.js" type="module"></script>`,
-											{
-												html: true,
-											},
-										);
+			html_rewrite: {
+				rewrite(reWriter) {
+					reWriter
+						.on("head", {
+							element(element) {
+								element.append(
+									`<script src="/@apply-react/client-hydrate.js" type="module"></script>`,
+									{
+										html: true,
 									},
-								})
-								.on("script#__hydrate_script__", {
-									element(element) {
-										element.remove();
-									},
-								});
-						},
-					}
-				: {},
+								);
+							},
+						})
+						.on("script#__hydrate_script__", {
+							element(element) {
+								element.remove();
+							},
+						});
+				},
+			},
 		},
 	};
 }

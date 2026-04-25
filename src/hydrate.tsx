@@ -1,36 +1,39 @@
+import _ROUTES_ from "@apply-react/client-routes.ts";
+import Shell from "@apply-react/client-shell.tsx";
 import { StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
-import Shell from "client-shell";
 import { getRelatedLayoutFromPathname } from "./layout";
-import _ROUTES_ from "routes/client-routes";
 import { formatPathname } from "./utils";
 
 if (document.readyState !== "loading") {
-  Hydrate();
+	Hydrate();
 } else {
-  document.addEventListener("DOMContentLoaded", Hydrate);
+	document.addEventListener("DOMContentLoaded", Hydrate);
 }
 
 async function Hydrate() {
-  const rootElement = document.getElementById("root");
-  if (rootElement) {
-    const pathname = formatPathname(window.location.pathname);
+	const rootElement = document.getElementById("root");
+	if (rootElement) {
+		const pathname = formatPathname(window.location.pathname);
 
-    const PageToRender = _ROUTES_[pathname];
-    if (!PageToRender) {
-      console.error("No page found for pathname:", window.location.pathname);
-      console.error("Available routes:", _ROUTES_);
-      throw new Error("pathname does not exists");
-    }
-    const WrappedPage = getRelatedLayoutFromPathname(pathname, _ROUTES_)
-      .reverse()
-      .reduce((Prev, Curr) => <Curr>{Prev}</Curr>, <PageToRender />);
+		const PageToRender = _ROUTES_[pathname];
+		if (!PageToRender) {
+			console.error("No page found for pathname:", window.location.pathname);
+			console.error("Available routes:", _ROUTES_);
+			throw new Error("pathname does not exists");
+		}
+		const WrappedPage = getRelatedLayoutFromPathname(pathname, _ROUTES_)
+			.reverse()
+			.reduce(
+				(Prev, Curr) => <Curr key={Curr.toString()}>{Prev}</Curr>,
+				<PageToRender />,
+			);
 
-    hydrateRoot(
-      rootElement,
-      <StrictMode>
-        <Shell>{WrappedPage}</Shell>
-      </StrictMode>
-    );
-  }
+		hydrateRoot(
+			rootElement,
+			<StrictMode>
+				<Shell>{WrappedPage}</Shell>
+			</StrictMode>,
+		);
+	}
 }

@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../node_modules/react/jsx-dev-runtime.js"],
+  "sourcesContent": [
+    "'use strict';\n\nif (process.env.NODE_ENV === 'production') {\n  module.exports = require('./cjs/react-jsx-dev-runtime.production.js');\n} else {\n  module.exports = require('./cjs/react-jsx-dev-runtime.development.js');\n}\n"
+  ],
+  "mappings": ";;;;;;;;;;EAK2B;AAAA,EAH3B,IAAI,OAAuC,CAE3C,EAAO;AAAA,IACL,OAAO,UAAkB;AAAA;AAAA;",
+  "debugId": "30358076008C451B64756E2164756E21",
+  "names": []
+}

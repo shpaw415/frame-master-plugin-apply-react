@@ -3,8 +3,8 @@ import type { JSX } from "react";
 let ws: WebSocket;
 
 function initializeWebSocket() {
-  if (ws) return;
-  ws = new WebSocket(`ws://${window.location.host}/_REACT_HMR/ws`);
+	if (ws) return;
+	ws = new WebSocket(`ws://${window.location.host}/_REACT_HMR/ws`);
 }
 
 /**
@@ -20,25 +20,28 @@ function initializeWebSocket() {
  * @returns A cleanup function to remove the HMR listener
  */
 export function setupHMR(
-  onRoutesUpdate: (
-    routes: Record<string, () => JSX.Element>
-  ) => Promise<void> | void
+	onRoutesUpdate: (
+		routes: Record<string, () => JSX.Element>,
+	) => Promise<void> | void,
 ) {
-  initializeWebSocket();
-  const handleMessage = async (event: MessageEvent) => {
-    const message = event.data as "update-routes";
-    switch (message) {
-      case "update-routes":
-        const newRoutes = (
-          await import(`/routes/client-routes.js?t=${Date.now()}`)
-        ).default;
-        await onRoutesUpdate(newRoutes);
-        break;
-    }
-  };
+	initializeWebSocket();
+	const handleMessage = async (event: MessageEvent) => {
+		const message = event.data as "update-routes";
+		let newRoutes: Record<string, () => JSX.Element>;
+		switch (message) {
+			case "update-routes":
+				newRoutes = (
+					await import(`/@apply-react/client-routes.js?t=${Date.now()}`)
+				).default;
+				await onRoutesUpdate(newRoutes);
+				break;
+			default:
+				break;
+		}
+	};
 
-  ws.addEventListener("message", handleMessage);
-  return () => {
-    ws.removeEventListener("message", handleMessage);
-  };
+	ws.addEventListener("message", handleMessage);
+	return () => {
+		ws.removeEventListener("message", handleMessage);
+	};
 }
