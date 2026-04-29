@@ -184,16 +184,22 @@ export default function applyReactPluginToHTML(
 								}
 							});
 
-							const htmlrewriter = new HTMLRewriter().on("head", {
-								element(element) {
-									element.append(
-										`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
-										{
-											html: true,
-										},
-									);
-								},
-							});
+							const htmlrewriter = new HTMLRewriter()
+								.on("head", {
+									element(element) {
+										element.append(
+											`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
+											{
+												html: true,
+											},
+										);
+									},
+								})
+								.on("script#__hydrate_script__", {
+									element(element) {
+										element.remove();
+									},
+								});
 
 							build.onLoad({ filter: /\.html$/ }, async (args) => {
 								const contents =
@@ -202,6 +208,11 @@ export default function applyReactPluginToHTML(
 
 								return {
 									contents: transformed,
+								};
+							});
+							build.finally("html", ({ contents }) => {
+								return {
+									contents: htmlrewriter.transform(contents as string),
 								};
 							});
 						},
