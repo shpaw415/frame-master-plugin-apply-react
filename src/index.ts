@@ -1,13 +1,9 @@
 import { join, relative } from "node:path";
 import { getBuilder } from "frame-master/build";
 import type { FrameMasterPlugin } from "frame-master/plugin";
-import { directiveManager, isDev } from "frame-master/utils";
+import { directiveManager } from "frame-master/utils";
 import { isProd } from "frame-master/utils";
 import { name, version } from "../package.json";
-
-declare global {
-	var HMR_ENABLED: boolean;
-}
 
 /**
  * Configuration options for the Apply-React plugin
@@ -97,7 +93,6 @@ export default function applyReactPluginToHTML(
 		enableHMR = process.env.NODE_ENV !== "production",
 		entrypointExtensions = [".tsx", ".jsx"],
 	} = props;
-	process.env.PUBLIC_HMR_ENABLED = enableHMR ? "true" : "false";
 	const cwd = process.cwd();
 
 	const pathToClientShell = props.clientShellPath
@@ -119,48 +114,56 @@ export default function applyReactPluginToHTML(
 		"node_modules/react-dom/cjs/react-dom.development.js",
 	];
 	const wsList: Bun.ServerWebSocket[] = [];
+
+	const toRoutePath = (fp: string) =>
+		join("@apply-react/routes", relative(join(cwd, route), fp));
+
+	const createEntrypoints = (routes: Record<string, string>) =>
+		Object.entries(routes).map(([_pathname, fp]) => toRoutePath(fp));
+
+	let currentDevRoute: Bun.MatchedRoute | null = null;
+
+	const getRoutes = (
+		current: typeof currentDevRoute,
+		fr: typeof fileRouter,
+	) => {
+		if (!current) return fr.routes;
+		return {
+			[current.pathname]: current.filePath,
+		};
+	};
+
 	return {
 		name,
 		version,
 		build: {
-			buildConfig: {
+			buildConfig: () => ({
 				entrypoints: [
 					...(isProd() ? [] : DevReactEntryPoints),
 					"@apply-react/client-routes.ts",
 					"@apply-react/client-hydrate.tsx",
 					"@apply-react/HMR.ts",
 					"@apply-react/client-shell.tsx",
-					...(isDev()
-						? Object.entries(fileRouter.routes).map(([pathname]) =>
-								join("@apply-react", relative(join(cwd, route), pathname)),
-							)
-						: []),
+					...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 				],
 				files: {
 					"@apply-react/client-routes.ts": `
-          ${Object.entries(fileRouter.routes)
+          ${Object.entries(getRoutes(currentDevRoute, fileRouter))
 						.map(
 							([_pathname, filePath], index) =>
-								`import _${index} from "${filePath}";`,
+								`import _${index} from "${toRoutePath(filePath)}";`,
 						)
 						.join("\n")}
           export default { ${Object.entries(fileRouter.routes)
 						.map(([pathname, _fp], index) => `"${pathname}": _${index}`)
 						.join(",\n")} };
           `,
-					...(isDev()
-						? Object.assign(
-								{},
-								...Object.entries(fileRouter.routes).map(
-									([pathname, filePath]) => ({
-										[join(
-											"@apply-react",
-											relative(join(cwd, route), pathname),
-										)]: `export { default } from "${filePath}";`,
-									}),
-								),
-							)
-						: {}),
+					...Object.assign(
+						{},
+						...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
+							[toRoutePath(fp)]: `export { default } from "${fp}";`,
+						})),
+					),
 					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";
 					`,
 					"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
@@ -204,10 +207,17 @@ export default function applyReactPluginToHTML(
 						},
 					},
 				],
-			},
+			}),
 			afterBuild() {
 				wsList.forEach((ws) => {
-					ws.send("update-routes");
+					(ws as unknown as Bun.ServerWebSocket<HMRMessage>).send(
+						JSON.stringify({
+							type: "update-routes",
+							route:
+								`${currentDevRoute?.src.replace(/\.(tsx|jsx)$/, ".js")}` as unknown as string,
+							pathname: currentDevRoute?.pathname as string,
+						} satisfies HMRMessage),
+					);
 				});
 			},
 		},
@@ -237,15 +247,20 @@ export default function applyReactPluginToHTML(
 			},
 		},
 		fileSystemWatchDir: enableHMR ? [route] : undefined,
-		onFileSystemChange(_ev, _fp, absolutePath) {
+		onFileSystemChange(_ev, _fname, absolutePath) {
+			console.log(`[Apply-React] File change detected: ${absolutePath}`);
 			if (!absolutePath.startsWith(route) || getBuilder()?.isBuilding()) return;
+			const rel = relative(route, absolutePath);
+			const pathname = filePathToPathname(rel);
+			currentDevRoute = fileRouter.match(pathname);
 			getBuilder()?.build();
 		},
 		router: {
-			before_request(master) {
-				master.setGlobalValues({
-					HMR_ENABLED: process.env.NODE_ENV === "development",
-				});
+			async before_request(master) {
+				const acceptHeader = master.request.headers.get("accept") || "";
+				if (!acceptHeader.includes("text/html") || !currentDevRoute) return;
+				currentDevRoute = null;
+				await master.builder.build();
 			},
 			html_rewrite: {
 				rewrite(reWriter) {
@@ -269,4 +284,12 @@ export default function applyReactPluginToHTML(
 			},
 		},
 	};
+}
+
+function filePathToPathname(fp: string) {
+	let fpNoExt = fp.replace(/\.(tsx|jsx)$/, "");
+	if (fpNoExt.endsWith("index")) {
+		fpNoExt = fpNoExt.slice(0, -"/index".length) || "/";
+	}
+	return fpNoExt.startsWith("/") ? fpNoExt : `/${fpNoExt}`;
 }

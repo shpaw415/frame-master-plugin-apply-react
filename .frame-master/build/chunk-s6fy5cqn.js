@@ -1,0 +1,2 @@
+var j;function G(){if(j)return;j=new WebSocket(`ws://${window.location.host}/_REACT_HMR/ws`)}function J(D){G();let x=async(F)=>{let q=JSON.parse(F.data),B;switch(q.type){case"update-routes":B=(await import(`/@apply-react/routes/${q.route}?t=${Date.now()}`)).default,await D({pathname:q.pathname,component:B});break;default:break}};return j.addEventListener("message",x),()=>{j.removeEventListener("message",x)}}
+export{J as f};

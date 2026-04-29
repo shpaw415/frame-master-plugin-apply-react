@@ -20,20 +20,24 @@ function initializeWebSocket() {
  * @returns A cleanup function to remove the HMR listener
  */
 export function setupHMR(
-	onRoutesUpdate: (
-		routes: Record<string, () => JSX.Element>,
-	) => Promise<void> | void,
+	onRoutesUpdate: (route: {
+		pathname: string;
+		component: () => JSX.Element;
+	}) => Promise<void> | void,
 ) {
 	initializeWebSocket();
-	const handleMessage = async (event: MessageEvent<"update-routes">) => {
-		const message = event.data;
-		let newRoutes: Record<string, () => JSX.Element>;
-		switch (message) {
+	const handleMessage = async (event: MessageEvent) => {
+		const message = JSON.parse(event.data) as HMRMessage;
+		let newRoutes: () => JSX.Element;
+		switch (message.type) {
 			case "update-routes":
 				newRoutes = (
-					await import(`/@apply-react/client-routes.js?t=${Date.now()}`)
+					await import(`/@apply-react/routes/${message.route}?t=${Date.now()}`)
 				).default;
-				await onRoutesUpdate(newRoutes);
+				await onRoutesUpdate({
+					pathname: message.pathname,
+					component: newRoutes,
+				});
 				break;
 			default:
 				break;

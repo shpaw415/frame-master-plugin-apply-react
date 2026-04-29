@@ -47,8 +47,15 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 		() =>
 			HMR_ENABLED
 				? setupHMR((newRoutes) => {
-						setRoutes(newRoutes);
-						setCurrentPage(createPage(window.location.pathname, newRoutes));
+						setRoutes((curr) => {
+							setCurrentPage(
+								createPage(window.location.pathname, {
+									...curr,
+									[newRoutes.pathname]: newRoutes.component,
+								}),
+							);
+							return { ...curr, [newRoutes.pathname]: newRoutes.component };
+						});
 					})
 				: undefined,
 		[createPage],

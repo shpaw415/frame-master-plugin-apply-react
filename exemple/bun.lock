@@ -6,7 +6,7 @@
       "name": "exemple",
       "dependencies": {
         "frame-master": "^3.1.3",
-        "frame-master-plugin-apply-react": "https://github.com/shpaw415/frame-master-plugin-apply-react.git#519eeb8",
+        "frame-master-plugin-apply-react": "https://github.com/shpaw415/frame-master-plugin-apply-react.git#6f69c9b",
         "frame-master-plugin-serve-from-build": "^1.0.0",
       },
       "devDependencies": {
@@ -38,7 +38,7 @@
 
     "frame-master": ["frame-master@3.1.3", "", { "dependencies": { "@shpaw415/webtoken": "^2.0.0", "@types/git": "^0.0.21", "chalk": "^5.6.2", "commander": "^14.0.2", "git": "^0.1.5", "react": "^19.2.3", "react-dom": "^19.2.3", "tar": "^7.5.2" }, "peerDependencies": { "typescript": "^6.0.3" }, "bin": { "frame-master": "bin/index.ts" } }, "sha512-OL5fUxtlQjrVXkyv187l2bSGfcORz4AGX1oHS5BK/YYe4I/7ulISrCxLf7I3unekTAACDU1K3iwKHCoPvqWm2Q=="],
 
-    "frame-master-plugin-apply-react": ["frame-master-plugin-apply-react@github:shpaw415/frame-master-plugin-apply-react#519eeb8", { "dependencies": { "frame-master-plugin-apply-react": "^0.2.6" }, "peerDependencies": { "frame-master": "^3.1.3", "react": "^19.2.0", "react-dom": "^19.2.0", "typescript": "^5.9.3" } }, "shpaw415-frame-master-plugin-apply-react-519eeb8", "sha512-kg19WC6s+a41x7uPrK3aBILXfkwd+gN5SeV2fkgHc5wQetmxzV6pyKJy2A/lMBXSARW8kwCtkanTySzXTh7ZRA=="],
+    "frame-master-plugin-apply-react": ["frame-master-plugin-apply-react@github:shpaw415/frame-master-plugin-apply-react#6f69c9b", { "dependencies": { "frame-master-plugin-apply-react": "^0.2.6" }, "peerDependencies": { "frame-master": "^3.1.3", "react": "^19.2.0", "react-dom": "^19.2.0", "typescript": "^5.9.3" } }, "shpaw415-frame-master-plugin-apply-react-6f69c9b", "sha512-RhS0BZNQaBlVTWvhMgA27BsoEyaKDWkYMGbVD29V0944BZhevwjmGPwQfKCMEybKfsvaPwhecBJIkBXhH1pMiQ=="],
 
     "frame-master-plugin-serve-from-build": ["frame-master-plugin-serve-from-build@1.0.0", "", { "peerDependencies": { "frame-master": "^3.1.1", "typescript": "^5.9.3" } }, "sha512-TrVIK+VoQEpco53lG/jNBxnY5usG1g0ZyJH3USsONpCRhTjYYYdH5j1sSpz++zWHZEk7Uywce2ZKmXtKqNtv/w=="],
 

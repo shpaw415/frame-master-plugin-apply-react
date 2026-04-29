@@ -13,3 +13,9 @@ declare module "@apply-react/HMR-enabled.ts" {
 	const HMR_ENABLED: boolean;
 	export default HMR_ENABLED;
 }
+
+declare type HMRMessage = {
+	type: "update-routes";
+	route: string;
+	pathname: string;
+};
