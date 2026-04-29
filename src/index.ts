@@ -147,7 +147,8 @@ export default function applyReactPluginToHTML(
 					`,
 					"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
 					"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
-					"@apply-react/HMR-enabled.ts": `export const HMR_ENABLED = ${enableHMR};`,
+					"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};
+					export default HMR_ENABLED;`,
 				},
 				plugins: [
 					{
