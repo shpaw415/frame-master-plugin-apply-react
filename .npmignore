@@ -1,3 +1,7 @@
 release-notes
 frame-master-test.code-workspace
 test-project
+.frame-master
+frame-master.config.ts
+test
+index.html
