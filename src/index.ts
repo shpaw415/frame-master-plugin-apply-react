@@ -260,6 +260,7 @@ export default function applyReactPluginToHTML(
 				const acceptHeader = master.request.headers.get("accept") || "";
 				if (!acceptHeader.includes("text/html") || !currentDevRoute) return;
 				currentDevRoute = null;
+				if (master.builder.isBuilding()) return;
 				await master.builder.build();
 			},
 			html_rewrite: {
