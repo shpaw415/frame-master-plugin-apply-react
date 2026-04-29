@@ -3,6 +3,7 @@ import { type JSX, useCallback, useEffect, useState } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
 import { formatPathname } from "./utils";
+import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
 
 /**
  * Client-side router component for the Apply-React plugin.
@@ -44,7 +45,7 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 
 	useEffect(
 		() =>
-			globalThis.HMR_ENABLED
+			HMR_ENABLED
 				? setupHMR((newRoutes) => {
 						setRoutes(newRoutes);
 						setCurrentPage(createPage(window.location.pathname, newRoutes));

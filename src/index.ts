@@ -143,12 +143,11 @@ export default function applyReactPluginToHTML(
 						.map(([pathname, _fp], index) => `"${pathname}": _${index}`)
 						.join(",\n")} };
           `,
-					"@apply-react/HMR.ts": `
-					globalThis.HMR_ENABLED = ${enableHMR ? "true" : "false"};
-					export * from "${join(__dirname, "HMR.ts")}";
+					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";
 					`,
 					"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
 					"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
+					"@apply-react/HMR-enabled.ts": `export const HMR_ENABLED = ${enableHMR};`,
 				},
 				plugins: [
 					{
