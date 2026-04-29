@@ -1,7 +1,7 @@
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { getBuilder } from "frame-master/build";
 import type { FrameMasterPlugin } from "frame-master/plugin";
-import { directiveManager } from "frame-master/utils";
+import { directiveManager, isDev } from "frame-master/utils";
 import { isProd } from "frame-master/utils";
 import { name, version } from "../package.json";
 
@@ -130,6 +130,11 @@ export default function applyReactPluginToHTML(
 					"@apply-react/client-hydrate.tsx",
 					"@apply-react/HMR.ts",
 					"@apply-react/client-shell.tsx",
+					...(isDev()
+						? Object.entries(fileRouter.routes).map(([pathname]) =>
+								join("@apply-react", relative(join(cwd, route), pathname)),
+							)
+						: []),
 				],
 				files: {
 					"@apply-react/client-routes.ts": `
@@ -143,6 +148,19 @@ export default function applyReactPluginToHTML(
 						.map(([pathname, _fp], index) => `"${pathname}": _${index}`)
 						.join(",\n")} };
           `,
+					...(isDev()
+						? Object.assign(
+								{},
+								...Object.entries(fileRouter.routes).map(
+									([pathname, filePath]) => ({
+										[join(
+											"@apply-react",
+											relative(join(cwd, route), pathname),
+										)]: `export { default } from "${filePath}";`,
+									}),
+								),
+							)
+						: {}),
 					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";
 					`,
 					"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,

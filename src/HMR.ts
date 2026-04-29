@@ -25,8 +25,8 @@ export function setupHMR(
 	) => Promise<void> | void,
 ) {
 	initializeWebSocket();
-	const handleMessage = async (event: MessageEvent) => {
-		const message = event.data as "update-routes";
+	const handleMessage = async (event: MessageEvent<"update-routes">) => {
+		const message = event.data;
 		let newRoutes: Record<string, () => JSX.Element>;
 		switch (message) {
 			case "update-routes":
