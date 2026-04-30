@@ -4,6 +4,7 @@ import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
 import { router, NotFoundError } from "./utils";
 import FallbackDefault404 from "@apply-react/404.tsx";
+import FallbackDefaultLoading from "@apply-react/loading.tsx";
 import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
 
 /**
@@ -92,25 +93,29 @@ export function RouterHost({
 	/** Override or extend the error-to-fallback-page resolver chain. */
 	errorResolvers?: ErrorFallbackResolver[];
 }) {
+	const [pageKey, setPageKey] = useState(0);
 	const [CurrentPage, _setCurrentPage] = useState<() => JSX.Element>(
 		() => children,
 	);
 
-	const [pageKey, setPageKey] = useState(0);
-
 	const setCurrentPage = useCallback<(PageElement: () => JSX.Element) => void>(
 		(PageElement) => {
-			_setCurrentPage(() => (
-				<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
-					<PageElement />
-				</ErrorWrapper>
-			));
+			_setCurrentPage(() => <PageElement />);
 		},
-		[errorResolvers, pageKey],
+		[],
 	);
 	const [routes, setRoutes] = useState(
 		typeof window === "undefined" ? {} : _ROUTES_,
 	);
+
+	// Eagerly import all loading components on mount so they're in the module
+	// cache before any navigation occurs. This ensures getLoadingComponent()
+	// resolves instantly (from cache) when the user clicks a link.
+	useEffect(() => {
+		Object.entries(_ROUTES_).forEach(([pathname, importer]) => {
+			if (pathname.endsWith("/loading")) importer?.();
+		});
+	}, []);
 
 	const createPage = useCallback(
 		async (_pathname: string, routes: typeof _ROUTES_) => {
@@ -156,6 +161,7 @@ export function RouterHost({
 
 	useEffect(() => {
 		const popStateHandler = async () => {
+			_setCurrentPage(await getLoadingComponent(window.location.pathname));
 			setCurrentPage(await createPage(window.location.pathname, routes));
 			setPageKey((k) => k + 1);
 		};
@@ -180,6 +186,7 @@ export function RouterHost({
 					"",
 					url.pathname + url.search + url.hash,
 				);
+				_setCurrentPage(await getLoadingComponent(url.pathname));
 				setCurrentPage(await getNotFoundComponent(url.pathname));
 				setPageKey((k) => k + 1);
 				return;
@@ -210,6 +217,8 @@ export function RouterHost({
 					"",
 					url.pathname + url.search + url.hash,
 				);
+				// Show loading state immediately
+				_setCurrentPage(await getLoadingComponent(url.pathname));
 				// Update current page
 				setCurrentPage(await createPage(window.location.pathname, routes));
 				setPageKey((k) => k + 1);
@@ -239,7 +248,21 @@ export function RouterHost({
 		};
 	}, [routes, createPage, setCurrentPage]);
 
-	return CurrentPage as unknown as JSX.Element;
+	return (
+		<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
+			{CurrentPage as unknown as JSX.Element}
+		</ErrorWrapper>
+	);
+}
+
+async function getLoadingComponent(pathname: string) {
+	// look for a loading.tsx at the same directory level as the requested page
+	const pathnameToLoading = pathname.replace(/\/?[^\/]*$/, "/loading");
+	const loadingMatch = router.match(pathnameToLoading);
+	const LoadingPage = loadingMatch
+		? ((await _ROUTES_[loadingMatch.name]?.()) ?? FallbackDefaultLoading)
+		: FallbackDefaultLoading;
+	return () => <LoadingPage />;
 }
 
 async function getNotFoundComponent(pathname: string) {

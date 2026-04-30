@@ -55,6 +55,10 @@ export type ApplyReactPluginOptions = {
 		 * Path to a custom 404 Not Found component to render when a route is not found or when a component throws a NotFoundError. This component will be used as a fallback for any route that does not have a specific 404 component defined at the same level in the file system.
 		 */
 		defaultNotFoundComponentPath?: string;
+		/**
+		 * Path to a custom Loading component to display during client-side page transitions while the route module is being imported. This component will be used as a fallback for any route that does not have a specific loading component defined at the same level in the file system.
+		 */
+		defaultLoadingComponentPath?: string;
 	}>;
 };
 
@@ -157,6 +161,7 @@ export default function applyReactPluginToHTML(
 					"@apply-react/HMR.ts",
 					"@apply-react/client-shell.tsx",
 					"@apply-react/404.tsx",
+					"@apply-react/loading.tsx",
 					...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 				],
 				files: {
@@ -187,6 +192,7 @@ export default function applyReactPluginToHTML(
 					"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
 					"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, hydration, entrypointExtensions, fallbacks })}; export default props;`,
 					"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
+					"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
 				},
 				plugins: [
 					{

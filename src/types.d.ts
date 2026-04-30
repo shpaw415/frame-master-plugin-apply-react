@@ -18,6 +18,10 @@ declare module "@apply-react/404.tsx" {
 	export default function NotFound(): React.JSX.Element;
 }
 
+declare module "@apply-react/loading.tsx" {
+	export default function Loading(): React.JSX.Element;
+}
+
 declare module "@apply-react/props.ts" {
 	const ApplyReactPluginOptions: import("./index.ts").ApplyReactPluginOptions;
 	export default ApplyReactPluginOptions;
