@@ -140,6 +140,7 @@ The plugin provides a `RouterHost` component that handles:
 - **History Management**: Integrates with browser history API (back/forward buttons)
 - **Layout Wrapping**: Automatically wraps pages with their corresponding layouts
 - **HMR Integration**: Updates routes dynamically during development
+- **Error Fallback**: Catches errors thrown inside page components and maps them to fallback pages
 
 ```tsx
 import { RouterHost } from "frame-master-plugin-apply-react/router";
@@ -147,6 +148,75 @@ import { RouterHost } from "frame-master-plugin-apply-react/router";
 export default function ClientShell({ children }: { children: JSX.Element }) {
   return <RouterHost>{children}</RouterHost>;
 }
+```
+
+## Fallback Pages & Error Handling
+
+`RouterHost` wraps every rendered page inside an `ErrorWrapper` — a React error boundary. When a page component throws, the error is passed through a **resolver chain** that maps it to a fallback page component.
+
+### Built-in: `NotFoundError`
+
+Throw `ThrowNotFound()` (or `new NotFoundError()`) anywhere inside a page to trigger the nearest co-located `404.tsx` file, exactly like a route miss.
+
+```tsx
+// src/pages/users/[userId].tsx
+import { ThrowNotFound } from "frame-master-plugin-apply-react/utils";
+
+export default function UserProfile() {
+  const user = useUser();
+
+  if (!user) ThrowNotFound(); // renders src/pages/users/404.tsx
+
+  return <div>{user.name}</div>;
+}
+```
+
+```tsx
+// src/pages/users/404.tsx
+export default function UserNotFound() {
+  return <h1>User not found</h1>;
+}
+```
+
+### Custom Error Resolvers
+
+Pass an `errorResolvers` array to `RouterHost` to handle your own error types. Each resolver is an async function `(error, pathname) => (() => JSX.Element) | null`. Return a component to handle the error, or `null` to fall through to the next resolver.
+
+```tsx
+import {
+  RouterHost,
+  defaultErrorResolvers,
+  type ErrorFallbackResolver,
+} from "frame-master-plugin-apply-react/router";
+
+class UnauthorizedError extends Error {}
+
+const myResolvers: ErrorFallbackResolver[] = [
+  async (error, pathname) => {
+    if (error instanceof UnauthorizedError) {
+      return () => <LoginPage />;
+    }
+    return null; // fall through
+  },
+  ...defaultErrorResolvers, // keep built-in NotFoundError handling
+];
+
+export default function ClientShell({ children }: { children: JSX.Element }) {
+  return (
+    <RouterHost errorResolvers={myResolvers}>{children}</RouterHost>
+  );
+}
+```
+
+If no resolver matches the thrown error, the boundary renders `null` (blank page). The `ErrorWrapper` is automatically reset on every navigation so stale error state never leaks between pages.
+
+### `ErrorFallbackResolver` type
+
+```ts
+type ErrorFallbackResolver = (
+  error: Error,
+  pathname: string,
+) => Promise<(() => JSX.Element) | null>;
 ```
 
 ## Server-Only Modules

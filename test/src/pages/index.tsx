@@ -13,6 +13,9 @@ export default function MainPage() {
 				<a href="/sub/123">Go to Dynamic Sub Page</a>
 				<a href="/profile">Go to Profile Page (404)</a>
 				<a href="/non-existent">Go to Non-existent Page (404)</a>
+				<a href="https://google.ca" target="_blank" rel="noopener noreferrer">
+					Go to external
+				</a>
 			</div>
 		</div>
 	);
