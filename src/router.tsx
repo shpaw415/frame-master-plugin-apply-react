@@ -108,15 +108,55 @@ export function RouterHost({
 	errorResolvers?: ErrorFallbackResolver[];
 }) {
 	const [pageKey, setPageKey] = useState(0);
+	const createPage = useCallback(
+		async (
+			_pathname: string,
+			routes: typeof _ROUTES_,
+			provided_layouts?: Array<
+				(props: { children: JSX.Element }) => JSX.Element
+			>,
+		) => {
+			const matched = router.match(_pathname);
+			if (!matched) {
+				console.error("No route matched for pathname:", _pathname);
+				console.error("Available routes:", routes);
+				return await getNotFoundComponent(_pathname);
+			}
+			const layouts =
+				provided_layouts ??
+				(await getRelatedLayoutFromPathname(matched.name, routes));
+			const Page = await routes[matched.name]?.();
+
+			if (!Page) return await getNotFoundComponent(_pathname);
+
+			return () => (
+				<WrapWithLayouts layouts={layouts}>
+					<Page />
+				</WrapWithLayouts>
+			);
+		},
+		[],
+	);
 	const [CurrentPage, _setCurrentPage] = useState<() => JSX.Element>(
 		() => children,
 	);
-
-	const setCurrentPage = useCallback<(PageElement: () => JSX.Element) => void>(
-		(PageElement) => {
+	const setCurrentPage = useCallback<
+		(pathname: string, routes: typeof _ROUTES_) => void
+	>(
+		async (pathname, routes) => {
+			const [Layouts, LoadingComponent] = await Promise.all([
+				getRelatedLayoutFromPathname(pathname, routes),
+				getLoadingComponent(pathname),
+			]);
+			_setCurrentPage(() => (
+				<WrapWithLayouts layouts={Layouts}>
+					<LoadingComponent />
+				</WrapWithLayouts>
+			));
+			const PageElement = await createPage(pathname, routes, Layouts);
 			_setCurrentPage(() => <PageElement />);
 		},
-		[],
+		[createPage],
 	);
 	const [routes, setRoutes] = useState(
 		typeof window === "undefined" ? {} : _ROUTES_,
@@ -131,52 +171,27 @@ export function RouterHost({
 		});
 	}, []);
 
-	const createPage = useCallback(
-		async (_pathname: string, routes: typeof _ROUTES_) => {
-			const matched = router.match(_pathname);
-			if (!matched) {
-				console.error("No route matched for pathname:", _pathname);
-				console.error("Available routes:", routes);
-				return await getNotFoundComponent(_pathname);
-			}
-			const pathname = matched.name;
-			const layouts = await getRelatedLayoutFromPathname(pathname, routes);
-			const Page = await routes[pathname]?.();
-
-			if (!Page) return await getNotFoundComponent(_pathname);
-
-			return () => (
-				<WrapWithLayouts layouts={layouts}>
-					<Page />
-				</WrapWithLayouts>
-			);
-		},
-		[],
-	);
-
 	useEffect(
 		() =>
 			HMR_ENABLED
 				? setupHMR((newRoutes) => {
 						setRoutes((curr) => {
-							createPage(window.location.pathname, {
+							setCurrentPage(window.location.pathname, {
 								...curr,
 								[newRoutes.pathname]: newRoutes.component,
-							}).then((page) => {
-								setCurrentPage(page);
-								setPageKey((k) => k + 1);
 							});
+							setPageKey((k) => k + 1);
 							return { ...curr, [newRoutes.pathname]: newRoutes.component };
 						});
 					})
 				: undefined,
-		[createPage, setCurrentPage],
+		[setCurrentPage],
 	);
 
 	useEffect(() => {
 		const popStateHandler = async () => {
 			_setCurrentPage(await getLoadingComponent(window.location.pathname));
-			setCurrentPage(await createPage(window.location.pathname, routes));
+			setCurrentPage(window.location.pathname, routes);
 			setPageKey((k) => k + 1);
 		};
 
@@ -190,8 +205,11 @@ export function RouterHost({
 			if (!anchor?.href || anchor.target === "_blank") return;
 
 			const url = new URL(anchor.href);
-			const matched = router.match(url.pathname);
 
+			// Only handle internal links (same origin)
+			if (url.origin !== window.location.origin) return;
+
+			const matched = router.match(url.pathname);
 			if (!matched) {
 				e.preventDefault();
 				console.log("not found no match for url:", url.pathname);
@@ -200,16 +218,13 @@ export function RouterHost({
 					"",
 					url.pathname + url.search + url.hash,
 				);
-				_setCurrentPage(await getLoadingComponent(url.pathname));
-				setCurrentPage(await getNotFoundComponent(url.pathname));
+
+				setCurrentPage(url.pathname, routes);
 				setPageKey((k) => k + 1);
 				return;
+			} else {
+				url.pathname = matched.pathname;
 			}
-
-			url.pathname = matched.pathname;
-
-			// Only handle internal links (same origin)
-			if (url.origin !== window.location.origin) return;
 
 			// Handle hash-only links (anchors on the same page)
 			if (
@@ -234,7 +249,7 @@ export function RouterHost({
 				// Show loading state immediately
 				_setCurrentPage(await getLoadingComponent(url.pathname));
 				// Update current page
-				setCurrentPage(await createPage(window.location.pathname, routes));
+				setCurrentPage(url.pathname, routes);
 				setPageKey((k) => k + 1);
 
 				// Handle hash scrolling after navigation
@@ -260,7 +275,7 @@ export function RouterHost({
 			window.removeEventListener("popstate", popStateHandler);
 			document.removeEventListener("click", clickHandler);
 		};
-	}, [routes, createPage, setCurrentPage]);
+	}, [routes, setCurrentPage]);
 
 	return (
 		<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
