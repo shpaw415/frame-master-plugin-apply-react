@@ -124,13 +124,13 @@ export function RouterHost({
 			if (!matched) {
 				console.error("No route matched for pathname:", _pathname);
 				console.error("Available routes:", routes);
-				return await getNotFoundComponent(_pathname);
+				return await getNotFoundComponent(_pathname, routes);
 			}
 			const pathname = matched.name;
 			const layouts = await getRelatedLayoutFromPathname(pathname, routes);
 			const Page = await routes[pathname]?.();
 
-			if (!Page) return await getNotFoundComponent(_pathname);
+			if (!Page) return await getNotFoundComponent(_pathname, routes);
 
 			return () => (
 				<WrapWithLayouts layouts={layouts}>
@@ -188,7 +188,7 @@ export function RouterHost({
 					url.pathname + url.search + url.hash,
 				);
 				_setCurrentPage(await getLoadingComponent(url.pathname));
-				setCurrentPage(await getNotFoundComponent(url.pathname));
+				setCurrentPage(await getNotFoundComponent(url.pathname, routes));
 				setPageKey((k) => k + 1);
 				return;
 			}
@@ -266,12 +266,20 @@ async function getLoadingComponent(pathname: string) {
 	return () => <LoadingPage />;
 }
 
-async function getNotFoundComponent(pathname: string) {
+async function getNotFoundComponent(
+	pathname: string,
+	routes: typeof _ROUTES_ = _ROUTES_,
+) {
 	// must fit the same level as the requested page, so we replace the last segment with 404
 	const pathnameTo404 = pathname.replace(/\/?[^\/]*$/, "/404");
 	const notFoundMatch = router.match(pathnameTo404);
 	const NotFoundPage = notFoundMatch
 		? ((await _ROUTES_[notFoundMatch.name]?.()) ?? FallbackDefault404)
 		: FallbackDefault404;
-	return () => <NotFoundPage />;
+	const layouts = await getRelatedLayoutFromPathname(pathname, routes);
+	return () => (
+		<WrapWithLayouts layouts={layouts}>
+			<NotFoundPage />
+		</WrapWithLayouts>
+	);
 }
