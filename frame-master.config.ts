@@ -14,6 +14,7 @@ export default {
 			clientShellPath: "test/src/client-shell.tsx",
 			route: "test/src/pages",
 			style: "nextjs",
+			hydration: "render",
 			fallbacks: {
 				defaultNotFoundComponentPath: "test/src/fallbacks/404.tsx",
 			},
