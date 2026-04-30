@@ -14,12 +14,18 @@ import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
 export type ErrorFallbackResolver = (
 	error: Error,
 	pathname: string,
+	Layouts: (props: { children: JSX.Element }) => JSX.Element | null,
 ) => Promise<(() => JSX.Element) | null>;
 
 const defaultErrorResolvers: ErrorFallbackResolver[] = [
-	async (error, pathname) => {
+	async (error, pathname, Layouts) => {
 		if (error instanceof NotFoundError) {
-			return getNotFoundComponent(pathname);
+			const NotFoundPage = await getNotFoundComponent(pathname);
+			return () => (
+				<Layouts>
+					<NotFoundPage />
+				</Layouts>
+			);
 		}
 		return null;
 	},
@@ -53,7 +59,14 @@ export class ErrorWrapper extends Component<
 	override async componentDidCatch(error: Error) {
 		const pathname = globalThis?.location?.pathname ?? "/";
 		for (const resolver of this.props.resolvers) {
-			const fallback = await resolver(error, pathname);
+			const layouts = await getRelatedLayoutFromPathname(pathname, _ROUTES_);
+			const fallback = await resolver(
+				error,
+				pathname,
+				({ children }: { children: JSX.Element }) => (
+					<WrapWithLayouts layouts={layouts}>{children}</WrapWithLayouts>
+				),
+			);
 			if (fallback) {
 				this.setState({ FallbackComponent: fallback });
 				return;

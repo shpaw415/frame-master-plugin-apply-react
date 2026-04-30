@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { createElement } from "react";
+import { createElement, type JSX } from "react";
 import { renderToString } from "react-dom/server";
 import { ErrorWrapper, type ErrorFallbackResolver } from "../src/router";
 import { NotFoundError } from "../src/utils";
@@ -73,7 +73,9 @@ describe("ErrorWrapper.render", () => {
 		const html = renderToString(
 			createElement(
 				ErrorWrapper,
-				{ resolvers: [] },
+				{ resolvers: [] } as unknown as React.ComponentProps<
+					typeof ErrorWrapper
+				>,
 				createElement(Child, null),
 			),
 		);
@@ -102,7 +104,7 @@ describe("ErrorWrapper.componentDidCatch", () => {
 		expect(setStateSpy).toHaveBeenCalledTimes(1);
 		expect(setStateSpy.mock.calls.at(0)?.at(0)).toEqual({
 			FallbackComponent: FallbackPage,
-		});
+		} as unknown as any);
 		// Stops at first match – second resolver must NOT be invoked
 		expect(resolverB).not.toHaveBeenCalled();
 	});
@@ -154,7 +156,11 @@ describe("ErrorWrapper.componentDidCatch", () => {
 
 		await instance.componentDidCatch(error);
 
-		expect(resolver).toHaveBeenCalledWith(error, pathname);
+		expect(resolver).toHaveBeenCalledWith(
+			error,
+			pathname,
+			expect.any(Function),
+		);
 
 		// Restore
 		(globalThis as unknown as { location: { pathname: string } }).location = {
