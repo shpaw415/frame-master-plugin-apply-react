@@ -46,6 +46,16 @@ export type ApplyReactPluginOptions = {
 	 * @default [".tsx", ".jsx"]
 	 */
 	entrypointExtensions?: string[];
+
+	/**
+	 * default fallbacks pages
+	 */
+	fallbacks?: Partial<{
+		/**
+		 * Path to a custom 404 Not Found component to render when a route is not found or when a component throws a NotFoundError. This component will be used as a fallback for any route that does not have a specific 404 component defined at the same level in the file system.
+		 */
+		defaultNotFoundComponentPath?: string;
+	}>;
 };
 
 /**
@@ -92,6 +102,7 @@ export default function applyReactPluginToHTML(
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
 		entrypointExtensions = [".tsx", ".jsx"],
+		fallbacks = {},
 	} = props;
 	const cwd = process.cwd();
 
@@ -144,6 +155,7 @@ export default function applyReactPluginToHTML(
 					"@apply-react/client-hydrate.tsx",
 					"@apply-react/HMR.ts",
 					"@apply-react/client-shell.tsx",
+					"@apply-react/404.tsx",
 					...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 				],
 				files: {
@@ -172,6 +184,8 @@ export default function applyReactPluginToHTML(
 					// HMR modules
 					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
 					"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
+
+					"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
 				},
 				plugins: [
 					{

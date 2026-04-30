@@ -14,6 +14,9 @@ export default {
 			clientShellPath: "test/src/client-shell.tsx",
 			route: "test/src/pages",
 			style: "nextjs",
+			fallbacks: {
+				defaultNotFoundComponentPath: "test/src/fallbacks/404.tsx",
+			},
 		}),
 		ServeFromBuild({
 			buildDir: ".frame-master/build",

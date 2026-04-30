@@ -36,3 +36,41 @@ export function preLoadPath(pathname: string) {
 		getRelatedLayoutFromPathname(matched.pathname, _ROUTES_),
 	]);
 }
+
+export class NotFoundError extends Error {
+	constructor() {
+		super("Not Found");
+		this.name = "NotFoundError";
+	}
+}
+/**
+ * Throw a NotFoundError to trigger the rendering of the NotFound component. This is useful inside route components to indicate that the requested resource was not found, allowing for a consistent handling of 404 errors across the application.
+ *
+ * this will be caught by the RouterHost component and will trigger the rendering of the NotFound component, which can be customized by the user to display a user-friendly message or UI for not found pages.
+ *
+ * The NotFound Component at the same level will be displayed when the error is thrown, allowing you to show a custom 404 page or message to the user.
+ * @example
+ * // e.g src/pages/users/404.tsx
+ * export default function UsersNotFound() {
+ *   return <div>User Not Found</div>;
+ * }
+ *
+ * // e.g src/pages/users/[userId].tsx
+ * import { ThrowNotFound } from "@apply-react/utils";
+ *
+ * export default function UserProfile({ userId }: { userId: string }) {
+ *   const user = useUser(userId);
+ *
+ *   if (!user) {
+ *     ThrowNotFound();
+ *   }
+ *
+ *   return <div>{user.name}'s Profile</div>;
+ * }
+ *
+ * @example
+ *
+ */
+export function ThrowNotFound() {
+	throw new NotFoundError();
+}
