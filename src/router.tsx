@@ -14,12 +14,18 @@ import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
 export type ErrorFallbackResolver = (
 	error: Error,
 	pathname: string,
+	Layouts: (props: { children: JSX.Element }) => JSX.Element | null,
 ) => Promise<(() => JSX.Element) | null>;
 
 const defaultErrorResolvers: ErrorFallbackResolver[] = [
-	async (error, pathname) => {
+	async (error, pathname, Layouts) => {
 		if (error instanceof NotFoundError) {
-			return getNotFoundComponent(pathname);
+			const NotFoundPage = await getNotFoundComponent(pathname);
+			return () => (
+				<Layouts>
+					<NotFoundPage />
+				</Layouts>
+			);
 		}
 		return null;
 	},
@@ -53,7 +59,14 @@ export class ErrorWrapper extends Component<
 	override async componentDidCatch(error: Error) {
 		const pathname = globalThis?.location?.pathname ?? "/";
 		for (const resolver of this.props.resolvers) {
-			const fallback = await resolver(error, pathname);
+			const layouts = await getRelatedLayoutFromPathname(pathname, _ROUTES_);
+			const fallback = await resolver(
+				error,
+				pathname,
+				({ children }: { children: JSX.Element }) => (
+					<WrapWithLayouts layouts={layouts}>{children}</WrapWithLayouts>
+				),
+			);
 			if (fallback) {
 				this.setState({ FallbackComponent: fallback });
 				return;
@@ -124,13 +137,13 @@ export function RouterHost({
 			if (!matched) {
 				console.error("No route matched for pathname:", _pathname);
 				console.error("Available routes:", routes);
-				return await getNotFoundComponent(_pathname, routes);
+				return await getNotFoundComponent(_pathname);
 			}
 			const pathname = matched.name;
 			const layouts = await getRelatedLayoutFromPathname(pathname, routes);
 			const Page = await routes[pathname]?.();
 
-			if (!Page) return await getNotFoundComponent(_pathname, routes);
+			if (!Page) return await getNotFoundComponent(_pathname);
 
 			return () => (
 				<WrapWithLayouts layouts={layouts}>
@@ -188,7 +201,7 @@ export function RouterHost({
 					url.pathname + url.search + url.hash,
 				);
 				_setCurrentPage(await getLoadingComponent(url.pathname));
-				setCurrentPage(await getNotFoundComponent(url.pathname, routes));
+				setCurrentPage(await getNotFoundComponent(url.pathname));
 				setPageKey((k) => k + 1);
 				return;
 			}
@@ -266,20 +279,12 @@ async function getLoadingComponent(pathname: string) {
 	return () => <LoadingPage />;
 }
 
-async function getNotFoundComponent(
-	pathname: string,
-	routes: typeof _ROUTES_ = _ROUTES_,
-) {
+async function getNotFoundComponent(pathname: string) {
 	// must fit the same level as the requested page, so we replace the last segment with 404
 	const pathnameTo404 = pathname.replace(/\/?[^\/]*$/, "/404");
 	const notFoundMatch = router.match(pathnameTo404);
 	const NotFoundPage = notFoundMatch
 		? ((await _ROUTES_[notFoundMatch.name]?.()) ?? FallbackDefault404)
 		: FallbackDefault404;
-	const layouts = await getRelatedLayoutFromPathname(pathname, routes);
-	return () => (
-		<WrapWithLayouts layouts={layouts}>
-			<NotFoundPage />
-		</WrapWithLayouts>
-	);
+	return () => <NotFoundPage />;
 }
