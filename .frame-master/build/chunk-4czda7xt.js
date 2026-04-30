@@ -1,1 +1,0 @@
-import{q as d,r as l}from"./chunk-tca13xra.js";function u(){return l("div",{style:{display:"flex",flexDirection:"column",gap:"1rem"},children:[d("h1",{children:"Sub Page"}),d("p",{children:"Test update 2"})]})}export{u as h};

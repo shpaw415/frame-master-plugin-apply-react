@@ -5,7 +5,7 @@
     "": {
       "name": "apply-react",
       "dependencies": {
-        "frame-master-plugin-apply-react": "^0.2.6",
+        "bun-file-system-router-browser": "^1.3.13",
       },
       "devDependencies": {
         "@types/bun": "^1.3.13",
@@ -36,6 +36,8 @@
 
     "@types/react-dom": ["@types/react-dom@19.2.3", "", { "peerDependencies": { "@types/react": "^19.2.0" } }, "sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ=="],
 
+    "bun-file-system-router-browser": ["bun-file-system-router-browser@1.3.13", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-2Gm+0KMJjiCRXBDN2YRGxG2p0w/ekgm4Zm4itfy20zbH0jWphhpaamj6+Cd7Q+Ix9LJS7IClzj41qf0toe2Idg=="],
+
     "bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
 
     "chalk": ["chalk@5.6.2", "", {}, "sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA=="],
@@ -47,8 +49,6 @@
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 
     "frame-master": ["frame-master@3.1.3", "", { "dependencies": { "@shpaw415/webtoken": "^2.0.0", "@types/git": "^0.0.21", "chalk": "^5.6.2", "commander": "^14.0.2", "git": "^0.1.5", "react": "^19.2.3", "react-dom": "^19.2.3", "tar": "^7.5.2" }, "peerDependencies": { "typescript": "^6.0.3" }, "bin": { "frame-master": "bin/index.ts" } }, "sha512-OL5fUxtlQjrVXkyv187l2bSGfcORz4AGX1oHS5BK/YYe4I/7ulISrCxLf7I3unekTAACDU1K3iwKHCoPvqWm2Q=="],
-
-    "frame-master-plugin-apply-react": ["frame-master-plugin-apply-react@0.2.6", "", { "peerDependencies": { "frame-master": "^3.0.1", "react": "^19.2.0", "react-dom": "^19.2.0", "typescript": "^5.9.3" } }, "sha512-AC6C5+TWTAR1ptm134kf/Oohqohp4Q2jeEIF8+OT/ehg/6pRl+lRDQyy9N2b3KA3/IpYKzSUi/gU2D2i4Mhc0g=="],
 
     "frame-master-plugin-serve-from-build": ["frame-master-plugin-serve-from-build@1.0.0", "", { "peerDependencies": { "frame-master": "^3.1.1", "typescript": "^5.9.3" } }, "sha512-TrVIK+VoQEpco53lG/jNBxnY5usG1g0ZyJH3USsONpCRhTjYYYdH5j1sSpz++zWHZEk7Uywce2ZKmXtKqNtv/w=="],
 

@@ -8,8 +8,9 @@ export default function MainPage() {
 			<button type="button" onClick={() => setState(state + 1)}>
 				Increment
 			</button>
-			<div>
+			<div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
 				<a href="/sub">Go to Sub Page</a>
+				<a href="/sub/123">Go to Dynamic Sub Page</a>
 			</div>
 		</div>
 	);

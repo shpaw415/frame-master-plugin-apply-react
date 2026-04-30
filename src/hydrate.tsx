@@ -3,7 +3,7 @@ import Shell from "@apply-react/client-shell.tsx";
 import { StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { getRelatedLayoutFromPathname } from "./layout";
-import { formatPathname } from "./utils";
+import { router } from "./utils";
 
 if (document.readyState !== "loading") {
 	Hydrate();
@@ -14,15 +14,23 @@ if (document.readyState !== "loading") {
 async function Hydrate() {
 	const rootElement = document.getElementById("root");
 	if (rootElement) {
-		const pathname = formatPathname(window.location.pathname);
+		const matched = router.match(window.location.pathname);
 
-		const PageToRender = _ROUTES_[pathname];
+		if (!matched) {
+			console.error("No route matched for pathname:", window.location.pathname);
+			console.error("Available routes:", _ROUTES_);
+			throw new Error("pathname does not exists");
+		}
+
+		const pathname = matched.pathname;
+
+		const PageToRender = await _ROUTES_[pathname]?.();
 		if (!PageToRender) {
 			console.error("No page found for pathname:", window.location.pathname);
 			console.error("Available routes:", _ROUTES_);
 			throw new Error("pathname does not exists");
 		}
-		const WrappedPage = getRelatedLayoutFromPathname(pathname, _ROUTES_)
+		const WrappedPage = (await getRelatedLayoutFromPathname(pathname, _ROUTES_))
 			.reverse()
 			.reduce(
 				(Prev, Curr) => <Curr key={Curr.toString()}>{Prev}</Curr>,

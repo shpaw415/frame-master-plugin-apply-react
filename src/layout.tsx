@@ -2,7 +2,7 @@ import type _ROUTES_ from "@apply-react/client-routes.ts";
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
 
-export function getRelatedLayoutFromPathname(
+export async function getRelatedLayoutFromPathname(
 	pathname: string,
 	routes: typeof _ROUTES_,
 ) {
@@ -18,16 +18,16 @@ export function getRelatedLayoutFromPathname(
 		(props: { children: JSX.Element }) => JSX.Element
 	> = [];
 
-	if (layouts["/layout"]) relatedLayouts.push(layouts["/layout"]);
+	if (layouts["/layout"]) relatedLayouts.push(await layouts["/layout"]?.());
 
 	if (paths.length === 0) return relatedLayouts;
 
 	const currentPathname = "";
-	for (const path of paths) {
+	for await (const path of paths) {
 		const testPathname = join(currentPathname, path);
 		const layoutPathToTest = `/${join(testPathname, "layout")}`;
 		if (typeof layouts[layoutPathToTest] === "undefined") continue;
-		relatedLayouts.push(layouts[layoutPathToTest]);
+		relatedLayouts.push(await layouts[layoutPathToTest]?.());
 	}
 
 	return relatedLayouts;
