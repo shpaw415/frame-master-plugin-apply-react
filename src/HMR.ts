@@ -22,21 +22,20 @@ function initializeWebSocket() {
 export function setupHMR(
 	onRoutesUpdate: (route: {
 		pathname: string;
-		component: () => JSX.Element;
+		component: () => Promise<() => JSX.Element>;
 	}) => Promise<void> | void,
 ) {
 	initializeWebSocket();
 	const handleMessage = async (event: MessageEvent) => {
 		const message = JSON.parse(event.data) as HMRMessage;
-		let newRoutes: () => JSX.Element;
 		switch (message.type) {
 			case "update-routes":
-				newRoutes = (
-					await import(`/@apply-react/routes/${message.route}?t=${Date.now()}`)
-				).default;
 				await onRoutesUpdate({
 					pathname: message.pathname,
-					component: newRoutes,
+					component: () =>
+						import(
+							`/@apply-react/routes/${message.route}?t=${Date.now()}`
+						).then((mod) => mod.default as () => JSX.Element),
 				});
 				break;
 			default:

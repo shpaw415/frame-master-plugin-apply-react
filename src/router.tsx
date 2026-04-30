@@ -27,10 +27,10 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 	);
 
 	const createPage = useCallback(
-		(_pathname: string, routes: typeof _ROUTES_) => {
+		async (_pathname: string, routes: typeof _ROUTES_) => {
 			const pathname = formatPathname(_pathname);
 			const layouts = getRelatedLayoutFromPathname(pathname, routes);
-			const Page = routes[pathname];
+			const Page = await routes[pathname]?.();
 
 			if (!Page) return () => <div>404 - Page Not Found</div>;
 
@@ -48,12 +48,10 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 			HMR_ENABLED
 				? setupHMR((newRoutes) => {
 						setRoutes((curr) => {
-							setCurrentPage(
-								createPage(window.location.pathname, {
-									...curr,
-									[newRoutes.pathname]: newRoutes.component,
-								}),
-							);
+							createPage(window.location.pathname, {
+								...curr,
+								[newRoutes.pathname]: newRoutes.component,
+							}).then(setCurrentPage);
 							return { ...curr, [newRoutes.pathname]: newRoutes.component };
 						});
 					})
@@ -62,11 +60,11 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 	);
 
 	useEffect(() => {
-		const popStateHandler = () => {
-			setCurrentPage(createPage(window.location.pathname, routes));
+		const popStateHandler = async () => {
+			setCurrentPage(await createPage(window.location.pathname, routes));
 		};
 
-		const clickHandler = (e: MouseEvent) => {
+		const clickHandler = async (e: MouseEvent) => {
 			if (e.ctrlKey) return;
 
 			const target = e.target as HTMLElement;
@@ -99,7 +97,7 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 							url.pathname + url.search + url.hash,
 						);
 						// Update current page
-						setCurrentPage(createPage(window.location.pathname, routes));
+						setCurrentPage(await createPage(window.location.pathname, routes));
 
 						// Handle hash scrolling after navigation
 						if (url.hash) {

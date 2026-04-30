@@ -148,28 +148,27 @@ export default function applyReactPluginToHTML(
 				],
 				files: {
 					"@apply-react/client-routes.ts": `
-          ${Object.entries(getRoutes(currentDevRoute, fileRouter))
-						.map(
-							([_pathname, filePath], index) =>
-								`import _${index} from "${toRoutePath(filePath)}";`,
-						)
-						.join("\n")}
-          export default { ${Object.entries(fileRouter.routes)
-						.map(([pathname, _fp], index) => `"${pathname}": _${index}`)
-						.join(",\n")} };
-          `,
+          			${Object.entries(getRoutes(currentDevRoute, fileRouter))
+									.map(
+										([_pathname, filePath], index) =>
+											`import _${index} from "${toRoutePath(filePath)}";`,
+									)
+									.join("\n")}
+          				export default { ${Object.entries(fileRouter.routes)
+										.map(([pathname, _fp], index) => `"${pathname}": _${index}`)
+										.join(",\n")} };
+          			`,
 					...Object.assign(
 						{},
 						...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
 							[toRoutePath(fp)]: `export { default } from "${fp}";`,
 						})),
 					),
-					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";
-					`,
 					"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
 					"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
-					"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};
-					export default HMR_ENABLED;`,
+					// HMR modules
+					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
+					"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
 				},
 				plugins: [
 					{

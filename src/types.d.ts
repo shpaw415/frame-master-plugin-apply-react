@@ -5,7 +5,7 @@ declare module "@apply-react/client-shell.tsx" {
 }
 
 declare module "@apply-react/client-routes.ts" {
-	const routes: Record<string, () => React.JSX.Element>;
+	const routes: Record<string, () => Promise<() => React.JSX.Element>>;
 	export default routes;
 }
 
