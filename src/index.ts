@@ -155,7 +155,10 @@ export default function applyReactPluginToHTML(
 									)
 									.join("\n")}
           				export default { ${Object.entries(fileRouter.routes)
-										.map(([pathname, _fp], index) => `"${pathname}": _${index}`)
+										.map(
+											([pathname, fp]) =>
+												`"${pathname}": () => import("${fp}").then((mod) => mod.default)`,
+										)
 										.join(",\n")} };
           			`,
 					...Object.assign(

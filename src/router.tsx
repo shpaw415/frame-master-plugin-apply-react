@@ -2,7 +2,7 @@ import _ROUTES_ from "@apply-react/client-routes.ts";
 import { type JSX, useCallback, useEffect, useState } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
-import { formatPathname } from "./utils";
+import { router } from "./utils";
 import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
 
 /**
@@ -28,8 +28,15 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 
 	const createPage = useCallback(
 		async (_pathname: string, routes: typeof _ROUTES_) => {
-			const pathname = formatPathname(_pathname);
-			const layouts = getRelatedLayoutFromPathname(pathname, routes);
+			const matched = router.match(_pathname);
+
+			if (!matched) {
+				console.error("No route matched for pathname:", _pathname);
+				console.error("Available routes:", routes);
+				return () => <div>404 - Page Not Found</div>;
+			}
+			const pathname = matched.name;
+			const layouts = await getRelatedLayoutFromPathname(pathname, routes);
 			const Page = await routes[pathname]?.();
 
 			if (!Page) return () => <div>404 - Page Not Found</div>;
@@ -70,48 +77,55 @@ export function RouterHost({ children }: { children: JSX.Element }) {
 			const target = e.target as HTMLElement;
 			const anchor = target.closest("a");
 
-			if (anchor?.href) {
-				const url = new URL(anchor.href);
-				url.pathname = formatPathname(url.pathname);
+			if (!anchor?.href) return;
 
-				// Only handle internal links (same origin)
-				if (url.origin === window.location.origin) {
-					// Handle hash-only links (anchors on the same page)
-					if (
-						url.pathname === window.location.pathname &&
-						url.search === window.location.search &&
-						url.hash
-					) {
-						// Let the browser handle scrolling to the anchor
-						return;
-					}
+			const url = new URL(anchor.href);
+			const matched = router.match(url.pathname);
 
-					e.preventDefault();
+			if (!matched) {
+				console.warn("No route matched for clicked link:", url.pathname);
+				// Not an internal route, let the browser handle it
+				return;
+			}
+			url.pathname = matched.pathname;
 
-					// Check if route exists
-					if (routes[url.pathname]) {
-						// Update browser history with full URL including hash
-						window.history.pushState(
-							null,
-							"",
-							url.pathname + url.search + url.hash,
-						);
-						// Update current page
-						setCurrentPage(await createPage(window.location.pathname, routes));
+			// Only handle internal links (same origin)
+			if (url.origin === window.location.origin) {
+				// Handle hash-only links (anchors on the same page)
+				if (
+					url.pathname === window.location.pathname &&
+					url.search === window.location.search &&
+					url.hash
+				) {
+					// Let the browser handle scrolling to the anchor
+					return;
+				}
 
-						// Handle hash scrolling after navigation
-						if (url.hash) {
-							// Use requestAnimationFrame to ensure the element is rendered
-							requestAnimationFrame(() => {
-								const element = document.getElementById(url.hash.slice(1));
-								if (element) {
-									element.scrollIntoView({ behavior: "smooth" });
-								}
-							});
-						} else {
-							// Scroll to top if no hash
-							window.scrollTo(0, 0);
-						}
+				e.preventDefault();
+
+				// Check if route exists
+				if (routes[matched.name]) {
+					// Update browser history with full URL including hash
+					window.history.pushState(
+						null,
+						"",
+						url.pathname + url.search + url.hash,
+					);
+					// Update current page
+					setCurrentPage(await createPage(window.location.pathname, routes));
+
+					// Handle hash scrolling after navigation
+					if (url.hash) {
+						// Use requestAnimationFrame to ensure the element is rendered
+						requestAnimationFrame(() => {
+							const element = document.getElementById(url.hash.slice(1));
+							if (element) {
+								element.scrollIntoView({ behavior: "smooth" });
+							}
+						});
+					} else {
+						// Scroll to top if no hash
+						window.scrollTo(0, 0);
 					}
 				}
 			}
