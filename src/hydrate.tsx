@@ -1,9 +1,10 @@
 import _ROUTES_ from "@apply-react/client-routes.ts";
 import Shell from "@apply-react/client-shell.tsx";
 import { StrictMode } from "react";
-import { hydrateRoot } from "react-dom/client";
 import { getRelatedLayoutFromPathname } from "./layout";
 import { router } from "./utils";
+import ApplyReactPluginOptions from "@apply-react/props.ts";
+import { createRoot, hydrateRoot } from "react-dom/client";
 
 if (document.readyState !== "loading") {
 	Hydrate();
@@ -37,11 +38,19 @@ async function Hydrate() {
 				<PageToRender />,
 			);
 
-		hydrateRoot(
-			rootElement,
+		const PageComponent = (
 			<StrictMode>
 				<Shell>{WrappedPage}</Shell>
-			</StrictMode>,
+			</StrictMode>
 		);
+
+		switch (ApplyReactPluginOptions.hydration) {
+			case "hydrate":
+				hydrateRoot(rootElement, PageComponent);
+				return;
+			case "render":
+				createRoot(rootElement).render(PageComponent);
+				break;
+		}
 	}
 }

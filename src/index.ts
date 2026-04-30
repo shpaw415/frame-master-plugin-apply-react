@@ -38,7 +38,7 @@ export type ApplyReactPluginOptions = {
 	 *
 	 * @default "hydrate"
 	 */
-	hydration?: "hydrate" /* | "render"*/;
+	hydration?: "hydrate" | "render";
 
 	/**
 	 * Set Custom entrypoints extensions
@@ -103,6 +103,7 @@ export default function applyReactPluginToHTML(
 		enableHMR = process.env.NODE_ENV !== "production",
 		entrypointExtensions = [".tsx", ".jsx"],
 		fallbacks = {},
+		hydration = "hydrate",
 	} = props;
 	const cwd = process.cwd();
 
@@ -184,7 +185,7 @@ export default function applyReactPluginToHTML(
 					// HMR modules
 					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
 					"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
-
+					"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, hydration, entrypointExtensions, fallbacks })}; export default props;`,
 					"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
 				},
 				plugins: [
