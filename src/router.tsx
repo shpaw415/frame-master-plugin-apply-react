@@ -51,8 +51,9 @@ export class ErrorWrapper extends Component<
 	}
 
 	override async componentDidCatch(error: Error) {
+		const pathname = globalThis?.location?.pathname ?? "/";
 		for (const resolver of this.props.resolvers) {
-			const fallback = await resolver(error, window.location.pathname);
+			const fallback = await resolver(error, pathname);
 			if (fallback) {
 				this.setState({ FallbackComponent: fallback });
 				return;
