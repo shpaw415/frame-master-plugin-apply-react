@@ -14,6 +14,10 @@ declare module "@apply-react/HMR-enabled.ts" {
 	export default HMR_ENABLED;
 }
 
+declare module "@apply-react/404.tsx" {
+	export default function NotFound(): React.JSX.Element;
+}
+
 declare type HMRMessage = {
 	type: "update-routes";
 	route: string;
