@@ -23,15 +23,17 @@ async function Hydrate() {
 			throw new Error("pathname does not exists");
 		}
 
-		const pathname = matched.pathname;
+		const routeName = matched.name;
 
-		const PageToRender = await _ROUTES_[pathname]?.();
+		const PageToRender = await _ROUTES_[routeName]?.();
 		if (!PageToRender) {
 			console.error("No page found for pathname:", window.location.pathname);
 			console.error("Available routes:", _ROUTES_);
 			throw new Error("pathname does not exists");
 		}
-		const WrappedPage = (await getRelatedLayoutFromPathname(pathname, _ROUTES_))
+		const WrappedPage = (
+			await getRelatedLayoutFromPathname(routeName, _ROUTES_)
+		)
 			.reverse()
 			.reduce(
 				(Prev, Curr) => <Curr key={Curr.toString()}>{Prev}</Curr>,
