@@ -6,6 +6,7 @@ import { router, NotFoundError } from "./utils";
 import FallbackDefault404 from "@apply-react/404.tsx";
 import FallbackDefaultLoading from "@apply-react/loading.tsx";
 import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
+import type { MatchedRoute } from "bun-file-system-router-browser";
 
 /**
  * Resolver function for mapping a thrown error to a fallback page component.
@@ -17,7 +18,7 @@ export type ErrorFallbackResolver = (
 	Layouts: (props: { children: JSX.Element }) => JSX.Element | null,
 ) => Promise<(() => JSX.Element) | null>;
 
-const defaultErrorResolvers: ErrorFallbackResolver[] = [
+export const defaultErrorResolvers: ErrorFallbackResolver[] = [
 	async (error, pathname, Layouts) => {
 		if (error instanceof NotFoundError) {
 			const NotFoundPage = await getNotFoundComponent(pathname);
@@ -86,6 +87,14 @@ export class ErrorWrapper extends Component<
 	}
 }
 
+export type RouterHostProps = {
+	children: JSX.Element;
+	/** Override or extend the error-to-fallback-page resolver chain. */
+	errorResolvers?: ErrorFallbackResolver[];
+	/** Callback invoked on every route change. */
+	onRouteChange?: (route: MatchedRoute) => void | Promise<void>;
+};
+
 /**
  * Client-side router component for the Apply-React plugin.
  *
@@ -102,11 +111,8 @@ export class ErrorWrapper extends Component<
 export function RouterHost({
 	children,
 	errorResolvers = defaultErrorResolvers,
-}: {
-	children: JSX.Element;
-	/** Override or extend the error-to-fallback-page resolver chain. */
-	errorResolvers?: ErrorFallbackResolver[];
-}) {
+	onRouteChange,
+}: RouterHostProps) {
 	const [pageKey, setPageKey] = useState(0);
 	const createPage = useCallback(
 		async (
@@ -153,10 +159,11 @@ export function RouterHost({
 					<LoadingComponent />
 				</WrapWithLayouts>
 			));
+			await onRouteChange?.(router.match(pathname) as MatchedRoute);
 			const PageElement = await createPage(pathname, routes, Layouts);
 			_setCurrentPage(() => <PageElement />);
 		},
-		[createPage],
+		[createPage, onRouteChange],
 	);
 	const [routes, setRoutes] = useState(
 		typeof window === "undefined" ? {} : _ROUTES_,

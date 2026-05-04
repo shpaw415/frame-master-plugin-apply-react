@@ -5,5 +5,13 @@ export default function ClientShell({
 }: {
 	children: React.JSX.Element;
 }) {
-	return <RouterHost>{children}</RouterHost>;
+	return (
+		<RouterHost
+			onRouteChange={(match) => {
+				console.log({ match });
+			}}
+		>
+			{children}
+		</RouterHost>
+	);
 }
