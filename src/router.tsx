@@ -230,7 +230,7 @@ export function RouterHost({
 				setPageKey((k) => k + 1);
 				return;
 			} else {
-				url.pathname = matched.pathname;
+				url.pathname = matched.name;
 			}
 
 			// Handle hash-only links (anchors on the same page)
@@ -256,7 +256,7 @@ export function RouterHost({
 				// Show loading state immediately
 				_setCurrentPage(await getLoadingComponent(url.pathname));
 				// Update current page
-				setCurrentPage(url.pathname, routes);
+				setCurrentPage(matched.name, routes);
 				setPageKey((k) => k + 1);
 
 				// Handle hash scrolling after navigation
