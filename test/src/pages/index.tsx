@@ -11,6 +11,7 @@ export default function MainPage() {
 			<div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
 				<a href="/sub">Go to Sub Page</a>
 				<a href="/sub/123">Go to Dynamic Sub Page</a>
+				<a href="/dynamic/123">Go to Dynamic Sub Page 2</a>
 				<a href="/profile">Go to Profile Page (404)</a>
 				<a href="/non-existent">Go to Non-existent Page (404)</a>
 				<a href="https://google.ca" target="_blank" rel="noopener noreferrer">
