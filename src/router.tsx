@@ -162,6 +162,7 @@ export function RouterHost({
 			await onRouteChange?.(router.match(pathname) as MatchedRoute);
 			const PageElement = await createPage(pathname, routes, Layouts);
 			_setCurrentPage(() => <PageElement />);
+			setPageKey((k) => k + 1);
 		},
 		[createPage, onRouteChange],
 	);
@@ -178,6 +179,7 @@ export function RouterHost({
 		});
 	}, []);
 
+	// HMR setup - listens for route changes from the HMR system and updates the route components in state without a full reload
 	useEffect(
 		() =>
 			HMR_ENABLED
@@ -187,7 +189,6 @@ export function RouterHost({
 								...curr,
 								[newRoutes.pathname]: newRoutes.component,
 							});
-							setPageKey((k) => k + 1);
 							return { ...curr, [newRoutes.pathname]: newRoutes.component };
 						});
 					})
@@ -197,9 +198,7 @@ export function RouterHost({
 
 	useEffect(() => {
 		const popStateHandler = async () => {
-			_setCurrentPage(await getLoadingComponent(window.location.pathname));
 			setCurrentPage(window.location.pathname, routes);
-			setPageKey((k) => k + 1);
 		};
 
 		const clickHandler = async (e: MouseEvent) => {
@@ -227,10 +226,9 @@ export function RouterHost({
 				);
 
 				setCurrentPage(url.pathname, routes);
-				setPageKey((k) => k + 1);
 				return;
 			} else {
-				url.pathname = matched.name;
+				url.pathname = matched.pathname;
 			}
 
 			// Handle hash-only links (anchors on the same page)
@@ -253,11 +251,8 @@ export function RouterHost({
 					"",
 					url.pathname + url.search + url.hash,
 				);
-				// Show loading state immediately
-				_setCurrentPage(await getLoadingComponent(url.pathname));
 				// Update current page
-				setCurrentPage(matched.name, routes);
-				setPageKey((k) => k + 1);
+				setCurrentPage(url.pathname, routes);
 
 				// Handle hash scrolling after navigation
 				if (url.hash) {
@@ -294,9 +289,9 @@ export function RouterHost({
 async function getLoadingComponent(pathname: string) {
 	// look for a loading.tsx at the same directory level as the requested page
 	const pathnameToLoading = pathname.replace(/\/?[^\/]*$/, "/loading");
-	const loadingMatch = router.match(pathnameToLoading);
-	const LoadingPage = loadingMatch
-		? ((await _ROUTES_[loadingMatch.name]?.()) ?? FallbackDefaultLoading)
+	const siblingLoader = _ROUTES_[pathnameToLoading];
+	const LoadingPage = siblingLoader
+		? ((await siblingLoader?.()) ?? FallbackDefaultLoading)
 		: FallbackDefaultLoading;
 	return () => <LoadingPage />;
 }
@@ -304,9 +299,9 @@ async function getLoadingComponent(pathname: string) {
 async function getNotFoundComponent(pathname: string) {
 	// must fit the same level as the requested page, so we replace the last segment with 404
 	const pathnameTo404 = pathname.replace(/\/?[^\/]*$/, "/404");
-	const notFoundMatch = router.match(pathnameTo404);
-	const NotFoundPage = notFoundMatch
-		? ((await _ROUTES_[notFoundMatch.name]?.()) ?? FallbackDefault404)
+	const sibling404 = _ROUTES_[pathnameTo404];
+	const NotFoundPage = sibling404
+		? ((await sibling404?.()) ?? FallbackDefault404)
 		: FallbackDefault404;
 	return () => <NotFoundPage />;
 }

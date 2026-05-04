@@ -1,11 +1,13 @@
 import type _ROUTES_ from "@apply-react/client-routes.ts";
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
+import { router } from "./utils";
 
 export async function getRelatedLayoutFromPathname(
-	pathname: string,
+	pn: string,
 	routes: typeof _ROUTES_,
 ) {
+	const pathname = router.match(pn)?.name as string;
 	const paths = pathname ? pathname.split("/").filter(Boolean) : [];
 	const layouts = Object.assign(
 		{},
