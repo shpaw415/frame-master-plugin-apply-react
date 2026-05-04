@@ -164,6 +164,7 @@ export default function applyReactPluginToHTML(
 					"@apply-react/loading.tsx",
 					...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 				],
+				splitting: true,
 				files: {
 					"@apply-react/client-routes.ts": `
           			${Object.entries(getRoutes(currentDevRoute, fileRouter))
