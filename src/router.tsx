@@ -150,6 +150,12 @@ export function RouterHost({
 		(pathname: string, routes: typeof _ROUTES_) => void
 	>(
 		async (pathname, routes) => {
+			if (!router.match(pathname)) {
+				const NotFoundPage = await getNotFoundComponent(pathname);
+				_setCurrentPage(() => <NotFoundPage />);
+				return;
+			}
+
 			const [Layouts, LoadingComponent] = await Promise.all([
 				getRelatedLayoutFromPathname(pathname, routes),
 				getLoadingComponent(pathname),
@@ -168,6 +174,11 @@ export function RouterHost({
 	);
 	const [routes, setRoutes] = useState(
 		typeof window === "undefined" ? {} : _ROUTES_,
+	);
+	const [currentMatch, setCurrentMatch] = useState(() =>
+		typeof window !== "undefined"
+			? router.match(window.location.pathname)
+			: null,
 	);
 
 	// Eagerly import all loading components on mount so they're in the module
@@ -229,6 +240,7 @@ export function RouterHost({
 				return;
 			} else {
 				url.pathname = matched.pathname;
+				setCurrentMatch(matched);
 			}
 
 			// Handle hash-only links (anchors on the same page)
@@ -246,11 +258,13 @@ export function RouterHost({
 			// Check if route exists
 			if (routes[matched.name]) {
 				// Update browser history with full URL including hash
-				window.history.pushState(
-					null,
-					"",
-					url.pathname + url.search + url.hash,
-				);
+				if (currentMatch?.pathname !== matched.pathname) {
+					window.history.pushState(
+						null,
+						"",
+						url.pathname + url.search + url.hash,
+					);
+				}
 				// Update current page
 				setCurrentPage(url.pathname, routes);
 
@@ -277,7 +291,7 @@ export function RouterHost({
 			window.removeEventListener("popstate", popStateHandler);
 			document.removeEventListener("click", clickHandler);
 		};
-	}, [routes, setCurrentPage]);
+	}, [routes, setCurrentPage, currentMatch]);
 
 	return (
 		<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
