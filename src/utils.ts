@@ -1,11 +1,4 @@
 import { getRelatedLayoutFromPathname } from "./layout";
-import _ROUTES_ from "@apply-react/client-routes.ts";
-import FileSystemRouter from "bun-file-system-router-browser";
-
-export const router = new FileSystemRouter({
-	routes: Object.keys(_ROUTES_),
-	style: "nextjs",
-});
 
 /**
  * Navigate to a new pathname keeping the SPA behavior (without full page reload).
@@ -23,9 +16,14 @@ const pathnameCached = new Set<string>();
 /**
  * Import a route and it's layouts in cache for a given pathname. This is useful to pre-load a page before navigating to it, improving the perceived performance of the application.
  */
-export function preLoadPath(pathname: string) {
+export async function preLoadPath(pathname: string) {
+	if (typeof window === "undefined") return Promise.resolve();
+
 	if (pathnameCached.has(pathname)) return Promise.resolve();
 	pathnameCached.add(pathname);
+
+	const { router } = await import("./router");
+	const _ROUTES_ = (await import("@apply-react/client-routes.ts")).default;
 
 	const matched = router.match(pathname);
 
