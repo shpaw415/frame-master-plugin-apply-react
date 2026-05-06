@@ -2,7 +2,7 @@ import _ROUTES_ from "@apply-react/client-routes.ts";
 import Shell from "@apply-react/client-shell.tsx";
 import { StrictMode } from "react";
 import { getRelatedLayoutFromPathname } from "./layout";
-import { router } from "./utils";
+import { router } from "./router";
 import ApplyReactPluginOptions from "@apply-react/props.ts";
 import { createRoot, hydrateRoot } from "react-dom/client";
 

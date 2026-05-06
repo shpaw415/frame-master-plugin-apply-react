@@ -2,11 +2,19 @@ import _ROUTES_ from "@apply-react/client-routes.ts";
 import { Component, type JSX, useCallback, useEffect, useState } from "react";
 import { setupHMR } from "./HMR";
 import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
-import { router, NotFoundError } from "./utils";
+import { NotFoundError } from "./utils";
 import FallbackDefault404 from "@apply-react/404.tsx";
 import FallbackDefaultLoading from "@apply-react/loading.tsx";
 import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
-import type { MatchedRoute } from "bun-file-system-router-browser";
+import {
+	FileSystemRouter,
+	type MatchedRoute,
+} from "bun-file-system-router-browser";
+
+export const router = new FileSystemRouter({
+	routes: Object.keys(_ROUTES_),
+	style: "nextjs",
+});
 
 /**
  * Resolver function for mapping a thrown error to a fallback page component.
