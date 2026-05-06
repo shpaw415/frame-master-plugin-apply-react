@@ -239,6 +239,15 @@ export default function applyReactPluginToHTML(
 									contents: htmlrewriter.transform(contents as string),
 								};
 							});
+							build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
+								const realPath = join(
+									cwd,
+									args.path.replace("@apply-react/routes", route),
+								);
+								return {
+									path: realPath,
+								};
+							});
 						},
 					},
 				],
