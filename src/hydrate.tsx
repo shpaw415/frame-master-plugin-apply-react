@@ -1,8 +1,8 @@
 import _ROUTES_ from "@apply-react/client-routes.ts";
 import Shell from "@apply-react/client-shell.tsx";
 import { StrictMode } from "react";
-import { getRelatedLayoutFromPathname } from "./layout";
-import { router } from "./router";
+import { getRelatedLayoutEntriesFromPathname, WrapWithLayouts } from "./layout";
+import { router, setInitialRouteSnapshot } from "./router";
 import ApplyReactPluginOptions from "@apply-react/props.ts";
 import { createRoot, hydrateRoot } from "react-dom/client";
 
@@ -31,14 +31,20 @@ async function Hydrate() {
 			console.error("Available routes:", _ROUTES_);
 			throw new Error("pathname does not exists");
 		}
+		const layouts = await getRelatedLayoutEntriesFromPathname(
+			routeName,
+			_ROUTES_,
+		);
+		setInitialRouteSnapshot({
+			pathname: window.location.pathname,
+			layouts,
+			Page: () => <PageToRender />,
+		});
 		const WrappedPage = (
-			await getRelatedLayoutFromPathname(routeName, _ROUTES_)
-		)
-			.reverse()
-			.reduce(
-				(Prev, Curr) => <Curr key={Curr.toString()}>{Prev}</Curr>,
-				<PageToRender />,
-			);
+			<WrapWithLayouts layouts={layouts}>
+				<PageToRender />
+			</WrapWithLayouts>
+		);
 
 		const PageComponent = (
 			<StrictMode>

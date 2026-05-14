@@ -1,7 +1,19 @@
 import _ROUTES_ from "@apply-react/client-routes.ts";
-import { Component, type JSX, useCallback, useEffect, useState } from "react";
+import {
+	Component,
+	type JSX,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { setupHMR } from "./HMR";
-import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
+import {
+	type LayoutEntry,
+	getRelatedLayoutEntriesFromPathname,
+	LayoutCache,
+	WrapWithLayouts,
+} from "./layout";
 import { NotFoundError } from "./utils";
 import FallbackDefault404 from "@apply-react/404.tsx";
 import FallbackDefaultLoading from "@apply-react/loading.tsx";
@@ -40,6 +52,20 @@ export const defaultErrorResolvers: ErrorFallbackResolver[] = [
 	},
 ];
 
+type PageComponent = () => JSX.Element;
+
+type InitialRouteSnapshot = {
+	pathname: string;
+	layouts: LayoutEntry[];
+	Page: PageComponent;
+};
+
+let initialRouteSnapshot: InitialRouteSnapshot | null = null;
+
+export function setInitialRouteSnapshot(snapshot: InitialRouteSnapshot | null) {
+	initialRouteSnapshot = snapshot;
+}
+
 interface ErrorWrapperProps {
 	children: JSX.Element;
 	resolvers: ErrorFallbackResolver[];
@@ -68,13 +94,10 @@ export class ErrorWrapper extends Component<
 	override async componentDidCatch(error: Error) {
 		const pathname = globalThis?.location?.pathname ?? "/";
 		for (const resolver of this.props.resolvers) {
-			const layouts = await getRelatedLayoutFromPathname(pathname, _ROUTES_);
 			const fallback = await resolver(
 				error,
 				pathname,
-				({ children }: { children: JSX.Element }) => (
-					<WrapWithLayouts layouts={layouts}>{children}</WrapWithLayouts>
-				),
+				({ children }: { children: JSX.Element }) => children,
 			);
 			if (fallback) {
 				this.setState({ FallbackComponent: fallback });
@@ -121,62 +144,67 @@ export function RouterHost({
 	errorResolvers = defaultErrorResolvers,
 	onRouteChange,
 }: RouterHostProps) {
+	const initialSnapshot =
+		typeof window === "undefined"
+			? null
+			: initialRouteSnapshot?.pathname === window.location.pathname
+				? initialRouteSnapshot
+				: null;
+	const navigationRef = useRef(0);
 	const [pageKey, setPageKey] = useState(0);
+	const [activeLayouts, setActiveLayouts] = useState<LayoutEntry[]>(
+		() => initialSnapshot?.layouts ?? [],
+	);
 	const createPage = useCallback(
-		async (
-			_pathname: string,
-			routes: typeof _ROUTES_,
-			provided_layouts?: Array<
-				(props: { children: JSX.Element }) => JSX.Element
-			>,
-		) => {
+		async (_pathname: string, routes: typeof _ROUTES_) => {
 			const matched = router.match(_pathname);
 			if (!matched) {
 				console.error("No route matched for pathname:", _pathname);
 				console.error("Available routes:", routes);
 				return await getNotFoundComponent(_pathname);
 			}
-			const layouts =
-				provided_layouts ??
-				(await getRelatedLayoutFromPathname(matched.name, routes));
 			const Page = await routes[matched.name]?.();
 
 			if (!Page) return await getNotFoundComponent(_pathname);
 
-			return () => (
-				<WrapWithLayouts layouts={layouts}>
-					<Page />
-				</WrapWithLayouts>
-			);
+			return () => <Page />;
 		},
 		[],
 	);
-	const [CurrentPage, _setCurrentPage] = useState<() => JSX.Element>(
-		() => children,
+	const [CurrentPage, _setCurrentPage] = useState<PageComponent>(
+		() => initialSnapshot?.Page ?? (() => children),
 	);
 	const setCurrentPage = useCallback<
 		(pathname: string, routes: typeof _ROUTES_) => void
 	>(
 		async (pathname, routes) => {
-			if (!router.match(pathname)) {
+			const navigationId = navigationRef.current + 1;
+			navigationRef.current = navigationId;
+			setPageKey(navigationId);
+
+			const matched = router.match(pathname);
+			setCurrentMatch(matched);
+
+			if (!matched) {
+				setActiveLayouts([]);
 				const NotFoundPage = await getNotFoundComponent(pathname);
-				_setCurrentPage(() => <NotFoundPage />);
+				if (navigationRef.current !== navigationId) return;
+				_setCurrentPage(() => NotFoundPage);
 				return;
 			}
 
-			const [Layouts, LoadingComponent] = await Promise.all([
-				getRelatedLayoutFromPathname(pathname, routes),
+			const [layouts, LoadingComponent] = await Promise.all([
+				getRelatedLayoutEntriesFromPathname(pathname, routes),
 				getLoadingComponent(pathname),
 			]);
-			_setCurrentPage(() => (
-				<WrapWithLayouts layouts={Layouts}>
-					<LoadingComponent />
-				</WrapWithLayouts>
-			));
-			await onRouteChange?.(router.match(pathname) as MatchedRoute);
-			const PageElement = await createPage(pathname, routes, Layouts);
-			_setCurrentPage(() => <PageElement />);
-			setPageKey((k) => k + 1);
+			if (navigationRef.current !== navigationId) return;
+			setActiveLayouts(layouts);
+			_setCurrentPage(() => LoadingComponent);
+			await onRouteChange?.(matched as MatchedRoute);
+			if (navigationRef.current !== navigationId) return;
+			const PageElement = await createPage(pathname, routes);
+			if (navigationRef.current !== navigationId) return;
+			_setCurrentPage(() => PageElement);
 		},
 		[createPage, onRouteChange],
 	);
@@ -203,6 +231,7 @@ export function RouterHost({
 		() =>
 			HMR_ENABLED
 				? setupHMR((newRoutes) => {
+						LayoutCache.clear();
 						setRoutes((curr) => {
 							setCurrentPage(window.location.pathname, {
 								...curr,
@@ -302,9 +331,11 @@ export function RouterHost({
 	}, [routes, setCurrentPage, currentMatch]);
 
 	return (
-		<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
-			{CurrentPage as unknown as JSX.Element}
-		</ErrorWrapper>
+		<WrapWithLayouts layouts={activeLayouts}>
+			<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
+				<CurrentPage />
+			</ErrorWrapper>
+		</WrapWithLayouts>
 	);
 }
 
