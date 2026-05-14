@@ -42,7 +42,8 @@ export function WrapWithLayouts({
 	children: JSX.Element;
 	layouts: Array<(props: { children: JSX.Element }) => JSX.Element>;
 }) {
-	return layouts.reduceRight((acc, Layout, _i) => {
-		return <Layout key={Layout.toString()}>{acc}</Layout>;
-	}, children);
+	return layouts.reduceRight(
+		(acc, Layout, _i) => <Layout>{acc}</Layout>,
+		children,
+	);
 }
