@@ -7,12 +7,12 @@
 		"@types/bun": "latest"
 	},
 	"peerDependencies": {
-		"typescript": "^5"
+		"typescript": "^5.9.3"
 	},
 	"dependencies": {
 		"frame-master": "^3.2.0",
-		"frame-master-plugin-apply-react": "https://github.com/shpaw415/frame-master-plugin-apply-react.git#6f69c9b",
-		"frame-master-plugin-serve-from-build": "^1.0.0"
+		"frame-master-plugin-apply-react": "https://github.com/shpaw415/frame-master-plugin-apply-react.git#improvement/layout-render-state",
+		"frame-master-plugin-serve-from-build": "^1.1.1"
 	},
 	"scripts": {
 		"dev": "NODE_ENV=development bun --hot frame-master dev",

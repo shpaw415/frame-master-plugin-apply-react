@@ -2,6 +2,11 @@ import type _ROUTES_ from "@apply-react/client-routes.ts";
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
 
+const LayoutCache = new Map<
+	string,
+	(props: { children: JSX.Element }) => JSX.Element
+>();
+
 export async function getRelatedLayoutFromPathname(
 	pn: string,
 	routes: typeof _ROUTES_,
@@ -20,7 +25,16 @@ export async function getRelatedLayoutFromPathname(
 		(props: { children: JSX.Element }) => JSX.Element
 	> = [];
 
-	if (layouts["/layout"]) relatedLayouts.push(await layouts["/layout"]?.());
+	if (layouts["/layout"]) {
+		if (!LayoutCache.has("/layout")) {
+			LayoutCache.set("/layout", await layouts["/layout"]?.());
+		}
+		relatedLayouts.push(
+			LayoutCache.get("/layout") as (props: {
+				children: JSX.Element;
+			}) => JSX.Element,
+		);
+	}
 
 	if (paths.length === 0) return relatedLayouts;
 
@@ -29,7 +43,14 @@ export async function getRelatedLayoutFromPathname(
 		const testPathname = join(currentPathname, path);
 		const layoutPathToTest = `/${join(testPathname, "layout")}`;
 		if (typeof layouts[layoutPathToTest] === "undefined") continue;
-		relatedLayouts.push(await layouts[layoutPathToTest]?.());
+		if (!LayoutCache.has(layoutPathToTest)) {
+			LayoutCache.set(layoutPathToTest, await layouts[layoutPathToTest]?.());
+		}
+		relatedLayouts.push(
+			LayoutCache.get(layoutPathToTest) as (props: {
+				children: JSX.Element;
+			}) => JSX.Element,
+		);
 	}
 
 	return relatedLayouts;
