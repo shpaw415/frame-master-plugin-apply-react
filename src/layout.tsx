@@ -2,12 +2,31 @@ import type _ROUTES_ from "@apply-react/client-routes.ts";
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
 
-export const LayoutCache = new Map<
-	string,
-	(props: { children: JSX.Element }) => JSX.Element
->();
+export type LayoutComponent = (props: { children: JSX.Element }) => JSX.Element;
 
-export async function getRelatedLayoutFromPathname(
+export type LayoutEntry = {
+	id: string;
+	Layout: LayoutComponent;
+};
+
+export const LayoutCache = new Map<string, LayoutComponent>();
+
+async function getLayoutComponent(
+	layouts: typeof _ROUTES_,
+	layoutPath: string,
+) {
+	if (!LayoutCache.has(layoutPath)) {
+		const Layout = await layouts[layoutPath]?.();
+		if (!Layout) {
+			throw new Error(`Missing layout component for ${layoutPath}`);
+		}
+		LayoutCache.set(layoutPath, Layout);
+	}
+
+	return LayoutCache.get(layoutPath) as LayoutComponent;
+}
+
+export async function getRelatedLayoutEntriesFromPathname(
 	pn: string,
 	routes: typeof _ROUTES_,
 ) {
@@ -21,39 +40,44 @@ export async function getRelatedLayoutFromPathname(
 			.map(([k, v]) => ({ [k]: v })),
 	) as typeof _ROUTES_;
 
-	const relatedLayouts: Array<
-		(props: { children: JSX.Element }) => JSX.Element
-	> = [];
+	const relatedLayouts: LayoutEntry[] = [];
 
 	if (layouts["/layout"]) {
-		if (!LayoutCache.has("/layout")) {
-			LayoutCache.set("/layout", await layouts["/layout"]?.());
-		}
-		relatedLayouts.push(
-			LayoutCache.get("/layout") as (props: {
-				children: JSX.Element;
-			}) => JSX.Element,
-		);
+		relatedLayouts.push({
+			id: "/layout",
+			Layout: await getLayoutComponent(layouts, "/layout"),
+		});
 	}
 
 	if (paths.length === 0) return relatedLayouts;
 
-	const currentPathname = "";
+	let currentPathname = "";
 	for await (const path of paths) {
-		const testPathname = join(currentPathname, path);
-		const layoutPathToTest = `/${join(testPathname, "layout")}`;
+		currentPathname = join(currentPathname, path);
+		const layoutPathToTest = `/${join(currentPathname, "layout")}`;
 		if (typeof layouts[layoutPathToTest] === "undefined") continue;
-		if (!LayoutCache.has(layoutPathToTest)) {
-			LayoutCache.set(layoutPathToTest, await layouts[layoutPathToTest]?.());
-		}
-		relatedLayouts.push(
-			LayoutCache.get(layoutPathToTest) as (props: {
-				children: JSX.Element;
-			}) => JSX.Element,
-		);
+		relatedLayouts.push({
+			id: layoutPathToTest,
+			Layout: await getLayoutComponent(layouts, layoutPathToTest),
+		});
 	}
 
 	return relatedLayouts;
+}
+
+export async function getRelatedLayoutFromPathname(
+	pn: string,
+	routes: typeof _ROUTES_,
+) {
+	return (await getRelatedLayoutEntriesFromPathname(pn, routes)).map(
+		({ Layout }) => Layout,
+	);
+}
+
+function isLayoutEntry(
+	layout: LayoutComponent | LayoutEntry,
+): layout is LayoutEntry {
+	return typeof layout === "object" && layout !== null && "Layout" in layout;
 }
 
 export function WrapWithLayouts({
@@ -61,10 +85,19 @@ export function WrapWithLayouts({
 	layouts,
 }: {
 	children: JSX.Element;
-	layouts: Array<(props: { children: JSX.Element }) => JSX.Element>;
+	layouts: Array<LayoutComponent | LayoutEntry>;
 }) {
-	return layouts.reduceRight(
-		(acc, Layout, _i) => <Layout key={Layout.toString()}>{acc}</Layout>,
+	const normalizedLayouts = layouts.map((layout, index) =>
+		isLayoutEntry(layout)
+			? layout
+			: {
+					id: `layout-${index}`,
+					Layout: layout,
+				},
+	);
+
+	return normalizedLayouts.reduceRight(
+		(acc, { Layout, id }) => <Layout key={id}>{acc}</Layout>,
 		children,
 	);
 }

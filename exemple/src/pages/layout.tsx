@@ -11,7 +11,7 @@ export default function MainLayout({
 			<h1>Main Layout {counter}</h1>
 			{children}
 			<button type="button" onClick={() => setCounter((c) => c + 1)}>
-				Increment
+				Increment ++
 			</button>
 		</div>
 	);
