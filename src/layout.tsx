@@ -2,7 +2,7 @@ import type _ROUTES_ from "@apply-react/client-routes.ts";
 import { join } from "frame-master/utils";
 import type { JSX } from "react";
 
-const LayoutCache = new Map<
+export const LayoutCache = new Map<
 	string,
 	(props: { children: JSX.Element }) => JSX.Element
 >();
@@ -64,7 +64,7 @@ export function WrapWithLayouts({
 	layouts: Array<(props: { children: JSX.Element }) => JSX.Element>;
 }) {
 	return layouts.reduceRight(
-		(acc, Layout, _i) => <Layout>{acc}</Layout>,
+		(acc, Layout, _i) => <Layout key={Layout.toString()}>{acc}</Layout>,
 		children,
 	);
 }

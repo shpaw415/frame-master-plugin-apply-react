@@ -18,6 +18,7 @@
 		"dev": "NODE_ENV=development bun --hot frame-master dev",
 		"start": "NODE_ENV=production bun frame-master start",
 		"build:dev": "NODE_ENV=development bun frame-master build",
-		"build": "NODE_ENV=production bun frame-master build"
+		"build": "NODE_ENV=production bun frame-master build",
+		"update": "bun update frame-master-plugin-apply-react"
 	}
 }

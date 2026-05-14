@@ -8,6 +8,7 @@ export default function MainPage() {
 			<button type="button" onClick={() => setState(state + 1)}>
 				Increment
 			</button>
+			<a href="/about">Go to about page</a>
 		</div>
 	);
 }

@@ -1,13 +1,18 @@
+import { useState } from "react";
+
 export default function MainLayout({
 	children,
 }: {
 	children: React.JSX.Element;
 }) {
+	const [counter, setCounter] = useState(0);
 	return (
 		<div>
-			<h1>Main Layout</h1>
+			<h1>Main Layout {counter}</h1>
 			{children}
-			<h1>Main Layout</h1>
+			<button type="button" onClick={() => setCounter((c) => c + 1)}>
+				Increment
+			</button>
 		</div>
 	);
 }

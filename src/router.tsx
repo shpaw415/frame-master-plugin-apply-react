@@ -1,7 +1,11 @@
 import _ROUTES_ from "@apply-react/client-routes.ts";
 import { Component, type JSX, useCallback, useEffect, useState } from "react";
 import { setupHMR } from "./HMR";
-import { getRelatedLayoutFromPathname, WrapWithLayouts } from "./layout";
+import {
+	getRelatedLayoutFromPathname,
+	LayoutCache,
+	WrapWithLayouts,
+} from "./layout";
 import { NotFoundError } from "./utils";
 import FallbackDefault404 from "@apply-react/404.tsx";
 import FallbackDefaultLoading from "@apply-react/loading.tsx";
@@ -203,6 +207,7 @@ export function RouterHost({
 		() =>
 			HMR_ENABLED
 				? setupHMR((newRoutes) => {
+						LayoutCache.clear();
 						setRoutes((curr) => {
 							setCurrentPage(window.location.pathname, {
 								...curr,
