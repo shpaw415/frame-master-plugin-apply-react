@@ -189,7 +189,7 @@ export function RouterHost({
 				setActiveLayouts([]);
 				const NotFoundPage = await getNotFoundComponent(pathname);
 				if (navigationRef.current !== navigationId) return;
-				_setCurrentPage(() => <NotFoundPage />);
+				_setCurrentPage(() => NotFoundPage);
 				return;
 			}
 
@@ -199,12 +199,12 @@ export function RouterHost({
 			]);
 			if (navigationRef.current !== navigationId) return;
 			setActiveLayouts(layouts);
-			_setCurrentPage(() => <LoadingComponent />);
+			_setCurrentPage(() => LoadingComponent);
 			await onRouteChange?.(matched as MatchedRoute);
 			if (navigationRef.current !== navigationId) return;
 			const PageElement = await createPage(pathname, routes);
 			if (navigationRef.current !== navigationId) return;
-			_setCurrentPage(() => <PageElement />);
+			_setCurrentPage(() => PageElement);
 		},
 		[createPage, onRouteChange],
 	);
