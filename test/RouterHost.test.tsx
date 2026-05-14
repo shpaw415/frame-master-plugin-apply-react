@@ -9,6 +9,9 @@ import {
 } from "../src/layout";
 import { RouterHost, setInitialRouteSnapshot } from "../src/router";
 
+const describeRouterHost =
+	typeof document === "undefined" ? describe.skip : describe;
+
 function flushNavigation() {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -25,8 +28,8 @@ function findLink(href: string) {
 	) as HTMLAnchorElement | undefined;
 }
 
-describe("RouterHost shared layouts", () => {
-	let root: Root;
+describeRouterHost("RouterHost shared layouts", () => {
+	let root: Root | undefined;
 	let container: HTMLDivElement;
 
 	beforeEach(async () => {
@@ -55,6 +58,8 @@ describe("RouterHost shared layouts", () => {
 	});
 
 	afterEach(async () => {
+		if (!root) return;
+
 		await act(async () => {
 			root.unmount();
 			await flushNavigation();
@@ -67,19 +72,21 @@ describe("RouterHost shared layouts", () => {
 	test("keeps shared layout state when navigating between sibling routes", async () => {
 		const input = getInput();
 		expect(input).not.toBeNull();
+		if (!input) throw new Error("Missing shared layout input");
 
 		await act(async () => {
-			input!.value = "kept across navigation";
-			input!.dispatchEvent(new Event("input", { bubbles: true }));
-			input!.dispatchEvent(new Event("change", { bubbles: true }));
+			input.value = "kept across navigation";
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+			input.dispatchEvent(new Event("change", { bubbles: true }));
 			await flushNavigation();
 		});
 
 		const subLink = findLink("/sub");
 		expect(subLink).toBeDefined();
+		if (!subLink) throw new Error("Missing /sub link");
 
 		await act(async () => {
-			subLink!.dispatchEvent(
+			subLink.dispatchEvent(
 				new MouseEvent("click", {
 					bubbles: true,
 					cancelable: true,
@@ -96,19 +103,21 @@ describe("RouterHost shared layouts", () => {
 	test("resets page fallback on navigation without remounting the shared layout", async () => {
 		const input = getInput();
 		expect(input).not.toBeNull();
+		if (!input) throw new Error("Missing shared layout input");
 
 		await act(async () => {
-			input!.value = "kept after fallback";
-			input!.dispatchEvent(new Event("input", { bubbles: true }));
-			input!.dispatchEvent(new Event("change", { bubbles: true }));
+			input.value = "kept after fallback";
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+			input.dispatchEvent(new Event("change", { bubbles: true }));
 			await flushNavigation();
 		});
 
 		const profileLink = findLink("/profile");
 		expect(profileLink).toBeDefined();
+		if (!profileLink) throw new Error("Missing /profile link");
 
 		await act(async () => {
-			profileLink!.dispatchEvent(
+			profileLink.dispatchEvent(
 				new MouseEvent("click", {
 					bubbles: true,
 					cancelable: true,
@@ -123,9 +132,10 @@ describe("RouterHost shared layouts", () => {
 
 		const homeLink = findLink("/");
 		expect(homeLink).toBeDefined();
+		if (!homeLink) throw new Error("Missing / link");
 
 		await act(async () => {
-			homeLink!.dispatchEvent(
+			homeLink.dispatchEvent(
 				new MouseEvent("click", {
 					bubbles: true,
 					cancelable: true,

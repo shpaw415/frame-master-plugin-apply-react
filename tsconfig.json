@@ -22,6 +22,11 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
+    "paths": {
+      "@apply-react/*": [
+        "./@apply-react/*"
+      ]
+    }
   },
   "include": [
     "src",
