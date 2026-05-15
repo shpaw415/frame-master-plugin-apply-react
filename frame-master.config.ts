@@ -2,6 +2,8 @@ import type { FrameMasterConfig } from "frame-master/server/types";
 import ApplyReact from "./src";
 import ServeFromBuild from "frame-master-plugin-serve-from-build";
 
+const indexContent = await Bun.file("test/src/index.html").text();
+
 export default {
 	HTTPServer: {
 		port: 3000,
@@ -26,8 +28,31 @@ export default {
 		{
 			name: "builder",
 			version: "0.1.0",
-			serverReady({ builder }) {
-				builder.build();
+			serverReady: async ({ builder }) => {
+				await builder.build();
+			},
+			build: {
+				buildConfig: {
+					plugins: [
+						{
+							name: "add-index-html",
+							setup(build) {
+								build.onResolve({ filter: /\.html$/ }, (args) => {
+									return {
+										path: args.path,
+										namespace: "html",
+									};
+								});
+								build.onLoad({ filter: /\.html$/, namespace: "html" }, () => {
+									return {
+										contents: indexContent,
+										loader: "html",
+									};
+								});
+							},
+						},
+					],
+				},
 			},
 		},
 	],

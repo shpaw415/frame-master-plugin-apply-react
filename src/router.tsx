@@ -180,16 +180,15 @@ export function RouterHost({
 		async (pathname, routes) => {
 			const navigationId = navigationRef.current + 1;
 			navigationRef.current = navigationId;
-			setPageKey(navigationId);
 
 			const matched = router.match(pathname);
-			setCurrentMatch(matched);
 
 			if (!matched) {
 				setActiveLayouts([]);
 				const NotFoundPage = await getNotFoundComponent(pathname);
 				if (navigationRef.current !== navigationId) return;
 				_setCurrentPage(() => NotFoundPage);
+				setPageKey(navigationId);
 				return;
 			}
 
@@ -200,6 +199,7 @@ export function RouterHost({
 			if (navigationRef.current !== navigationId) return;
 			setActiveLayouts(layouts);
 			_setCurrentPage(() => LoadingComponent);
+			setPageKey(navigationId);
 			await onRouteChange?.(matched as MatchedRoute);
 			if (navigationRef.current !== navigationId) return;
 			const PageElement = await createPage(pathname, routes);
@@ -210,11 +210,6 @@ export function RouterHost({
 	);
 	const [routes, setRoutes] = useState(
 		typeof window === "undefined" ? {} : _ROUTES_,
-	);
-	const [currentMatch, setCurrentMatch] = useState(() =>
-		typeof window !== "undefined"
-			? router.match(window.location.pathname)
-			: null,
 	);
 
 	// Eagerly import all loading components on mount so they're in the module
@@ -259,6 +254,8 @@ export function RouterHost({
 			if (!anchor?.href || anchor.target === "_blank") return;
 
 			const url = new URL(anchor.href);
+			const nextLocation = getLocationHref(url);
+			const currentLocation = getLocationHref(window.location);
 
 			// Only handle internal links (same origin)
 			if (url.origin !== window.location.origin) return;
@@ -267,18 +264,15 @@ export function RouterHost({
 			if (!matched) {
 				e.preventDefault();
 				console.log("not found no match for url:", url.pathname);
-				window.history.pushState(
-					null,
-					"",
-					url.pathname + url.search + url.hash,
-				);
+				if (nextLocation !== currentLocation) {
+					window.history.pushState(null, "", nextLocation);
+				}
 
 				setCurrentPage(url.pathname, routes);
 				return;
-			} else {
-				url.pathname = matched.pathname;
-				setCurrentMatch(matched);
 			}
+
+			url.pathname = matched.pathname;
 
 			// Handle hash-only links (anchors on the same page)
 			if (
@@ -295,12 +289,8 @@ export function RouterHost({
 			// Check if route exists
 			if (routes[matched.name]) {
 				// Update browser history with full URL including hash
-				if (currentMatch?.pathname !== matched.pathname) {
-					window.history.pushState(
-						null,
-						"",
-						url.pathname + url.search + url.hash,
-					);
+				if (nextLocation !== currentLocation) {
+					window.history.pushState(null, "", nextLocation);
 				}
 				// Update current page
 				setCurrentPage(url.pathname, routes);
@@ -328,7 +318,7 @@ export function RouterHost({
 			window.removeEventListener("popstate", popStateHandler);
 			document.removeEventListener("click", clickHandler);
 		};
-	}, [routes, setCurrentPage, currentMatch]);
+	}, [routes, setCurrentPage]);
 
 	return (
 		<WrapWithLayouts layouts={activeLayouts}>
@@ -347,6 +337,10 @@ async function getLoadingComponent(pathname: string) {
 		? ((await siblingLoader?.()) ?? FallbackDefaultLoading)
 		: FallbackDefaultLoading;
 	return () => <LoadingPage />;
+}
+
+function getLocationHref(location: Pick<URL, "pathname" | "search" | "hash">) {
+	return location.pathname + location.search + location.hash;
 }
 
 async function getNotFoundComponent(pathname: string) {
