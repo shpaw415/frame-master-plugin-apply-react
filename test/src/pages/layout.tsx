@@ -18,9 +18,12 @@ export default function MainLayout({
 					onChange={(event) => setLayoutState(event.target.value)}
 				/>
 			</label>
-			<nav>
+			<nav
+				aria-label="main navigation"
+				style={{ display: "flex", gap: "1rem" }}
+			>
 				<a href="/">Home</a>
-				<a href="/sub">Sub</a>
+				<a href="/sub?id=1">Sub</a>
 				<a href="/profile">Profile</a>
 			</nav>
 			{children}

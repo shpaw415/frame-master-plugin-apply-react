@@ -58,10 +58,11 @@ describeRouterHost("RouterHost shared layouts", () => {
 	});
 
 	afterEach(async () => {
-		if (!root) return;
+		const mountedRoot = root;
+		if (!mountedRoot) return;
 
 		await act(async () => {
-			root.unmount();
+			mountedRoot.unmount();
 			await flushNavigation();
 		});
 		LayoutCache.clear();

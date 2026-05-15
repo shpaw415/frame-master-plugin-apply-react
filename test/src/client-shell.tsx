@@ -8,10 +8,12 @@ export default function ClientShell({
 	return (
 		<RouterHost
 			onRouteChange={(match) => {
-				return new Promise((resolve) => {
-					console.log("Route changed to:", match);
-					setTimeout(resolve, 2000);
-				});
+				if (match.pathname === "/sub") {
+					return new Promise((resolve) => {
+						console.log("Route changed to:", match);
+						setTimeout(resolve, 2000);
+					});
+				}
 			}}
 		>
 			{children}
