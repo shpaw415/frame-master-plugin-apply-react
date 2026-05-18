@@ -1,5 +1,51 @@
 import { describe, expect, test } from "bun:test";
-import { NotFoundError, ThrowNotFound } from "../src/utils";
+import {
+	getLocationHref,
+	isSameLocation,
+	NotFoundError,
+	ThrowNotFound,
+} from "../src/utils";
+
+describe("getLocationHref", () => {
+	test("joins pathname, search, and hash into a comparable href", () => {
+		expect(
+			getLocationHref({
+				pathname: "/about",
+				search: "?tab=team",
+				hash: "#members",
+			}),
+		).toBe("/about?tab=team#members");
+	});
+});
+
+describe("isSameLocation", () => {
+	test("returns true when pathname, search, and hash all match", () => {
+		expect(
+			isSameLocation(
+				{ pathname: "/about", search: "", hash: "" },
+				{ pathname: "/about", search: "", hash: "" },
+			),
+		).toBe(true);
+	});
+
+	test("returns false when only the search differs", () => {
+		expect(
+			isSameLocation(
+				{ pathname: "/about", search: "", hash: "" },
+				{ pathname: "/about", search: "?tab=team", hash: "" },
+			),
+		).toBe(false);
+	});
+
+	test("returns false when only the hash differs", () => {
+		expect(
+			isSameLocation(
+				{ pathname: "/about", search: "", hash: "" },
+				{ pathname: "/about", search: "", hash: "#members" },
+			),
+		).toBe(false);
+	});
+});
 
 describe("NotFoundError", () => {
 	test("is an instance of Error", () => {

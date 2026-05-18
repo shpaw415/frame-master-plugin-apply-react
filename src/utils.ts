@@ -11,6 +11,16 @@ export function navigate(pathname: string) {
 	document.body.removeChild(a);
 }
 
+export type LocationLike = Pick<URL, "pathname" | "search" | "hash">;
+
+export function getLocationHref(location: LocationLike) {
+	return location.pathname + location.search + location.hash;
+}
+
+export function isSameLocation(current: LocationLike, next: LocationLike) {
+	return getLocationHref(current) === getLocationHref(next);
+}
+
 const pathnameCached = new Set<string>();
 
 /**
