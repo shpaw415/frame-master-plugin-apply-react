@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import routes from "@apply-react/client-routes.ts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import HomePage from "./src/pages/index";
-import routes from "@apply-react/client-routes.ts";
 import {
 	getRelatedLayoutEntriesFromPathname,
 	LayoutCache,
 } from "../src/layout";
 import { RouterHost, setInitialRouteSnapshot } from "../src/router";
+import HomePage from "./src/pages/index";
 
 const describeRouterHost = describe;
 

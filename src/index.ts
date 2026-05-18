@@ -1,8 +1,7 @@
-import { join, relative } from "node:path";
-import { getBuilder } from "frame-master/build";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import type { Builder } from "frame-master/build";
 import type { FrameMasterPlugin } from "frame-master/plugin";
-import { directiveManager } from "frame-master/utils";
-import { isProd } from "frame-master/utils";
+import { directiveManager, isProd } from "frame-master/utils";
 import { name, version } from "../package.json";
 
 /**
@@ -130,6 +129,8 @@ export default function applyReactPluginToHTML(
 		"node_modules/react-dom/cjs/react-dom.development.js",
 	];
 	const wsList: Bun.ServerWebSocket[] = [];
+	const routeDir = join(cwd, route);
+	let liveBuilder: Builder | null = null;
 
 	const toRoutePath = (fp: string) =>
 		join("@apply-react/routes", relative(join(cwd, route), fp));
@@ -137,7 +138,96 @@ export default function applyReactPluginToHTML(
 	const createEntrypoints = (routes: Record<string, string>) =>
 		Object.entries(routes).map(([_pathname, fp]) => toRoutePath(fp));
 
-	let currentDevRoute: Bun.MatchedRoute | null = null;
+	type DevBuildTarget = {
+		matchedRoute: Bun.MatchedRoute;
+		pathname: string;
+	};
+
+	let currentDevRoute: DevBuildTarget | null = null;
+	let queuedDevRoute: DevBuildTarget | null = null;
+	let pendingRouteUpdate: DevBuildTarget | null = null;
+	let selectiveBuildPromise: Promise<void> | null = null;
+
+	const sendHMRMessage = (message: HMRMessage) => {
+		wsList.forEach((ws) => {
+			(ws as unknown as Bun.ServerWebSocket<HMRMessage>).send(
+				JSON.stringify(message),
+			);
+		});
+	};
+
+	const queueDevRouteBuild = (target: DevBuildTarget) => {
+		queuedDevRoute = target;
+	};
+
+	const runQueuedDevBuilds = async () => {
+		const builder = liveBuilder;
+		if (!builder || selectiveBuildPromise) return selectiveBuildPromise;
+
+		selectiveBuildPromise = (async () => {
+			while (queuedDevRoute) {
+				const nextRoute = queuedDevRoute;
+				queuedDevRoute = null;
+
+				const activeBuild = builder.awaitBuildFinish();
+				if (builder.isBuilding() && activeBuild) {
+					await activeBuild;
+				}
+
+				currentDevRoute = nextRoute;
+				pendingRouteUpdate = nextRoute;
+				await builder.build();
+			}
+		})()
+			.catch((error) => {
+				console.error("[Apply-React] Failed to run queued dev build", error);
+			})
+			.finally(() => {
+				selectiveBuildPromise = null;
+				if (queuedDevRoute) {
+					void runQueuedDevBuilds();
+				}
+			});
+
+		return selectiveBuildPromise;
+	};
+
+	const buildRouteUpdatePath = (target: DevBuildTarget) =>
+		target.matchedRoute.src.replace(/\.(tsx|jsx)$/, ".js");
+
+	const requestDevRouteBuild = async (pathname: string) => {
+		const matchedRoute = fileRouter.match(pathname);
+		if (!matchedRoute) {
+			const missingResponse = {
+				status: "missing",
+				pathname,
+			} satisfies DevRouteBuildResponse;
+			sendHMRMessage({
+				type: "route-build-missing",
+				pathname,
+			});
+			return missingResponse;
+		}
+
+		const target = {
+			matchedRoute,
+			pathname: matchedRoute.pathname,
+		} satisfies DevBuildTarget;
+
+		sendHMRMessage({
+			type: "route-build-started",
+			pathname: target.pathname,
+			routeName: target.matchedRoute.name,
+		});
+		queueDevRouteBuild(target);
+		void runQueuedDevBuilds();
+
+		return {
+			status: "building",
+			pathname: target.pathname,
+			routeName: target.matchedRoute.name,
+		} satisfies DevRouteBuildResponse;
+	};
 
 	const getRoutes = (
 		current: typeof currentDevRoute,
@@ -145,13 +235,16 @@ export default function applyReactPluginToHTML(
 	) => {
 		if (!current) return fr.routes;
 		return {
-			[current.pathname]: current.filePath,
+			[current.matchedRoute.name]: current.matchedRoute.filePath,
 		};
 	};
 
 	return {
 		name,
 		version,
+		serverReady({ builder }) {
+			liveBuilder = builder;
+		},
 		build: {
 			buildConfig: () => ({
 				entrypoints: [
@@ -253,16 +346,15 @@ export default function applyReactPluginToHTML(
 				],
 			}),
 			afterBuild() {
-				wsList.forEach((ws) => {
-					(ws as unknown as Bun.ServerWebSocket<HMRMessage>).send(
-						JSON.stringify({
-							type: "update-routes",
-							route:
-								`${currentDevRoute?.src.replace(/\.(tsx|jsx)$/, ".js")}` as unknown as string,
-							pathname: currentDevRoute?.pathname as string,
-						} satisfies HMRMessage),
-					);
+				if (!pendingRouteUpdate) return;
+
+				sendHMRMessage({
+					type: "update-routes",
+					route: buildRouteUpdatePath(pendingRouteUpdate),
+					pathname: pendingRouteUpdate.pathname,
+					routeName: pendingRouteUpdate.matchedRoute.name,
 				});
+				pendingRouteUpdate = null;
 			},
 		},
 		serverConfig: {
@@ -276,11 +368,28 @@ export default function applyReactPluginToHTML(
 								? new Response("ws upgraded", { status: 101 })
 								: new Response("upgrade failed", { status: 400 })
 					: new Response("HMR disabled", { status: 503 }),
+				"/_REACT_HMR/build-route": enableHMR
+					? async (req) => {
+							const pathname = new URL(req.url).searchParams.get("pathname");
+							if (!pathname) {
+								return Response.json(
+									{ error: "pathname query parameter is required" },
+									{ status: 400 },
+								);
+							}
+
+							const result = await requestDevRouteBuild(pathname);
+							return Response.json(result, {
+								status: result.status === "missing" ? 404 : 202,
+							});
+						}
+					: new Response("HMR disabled", { status: 503 }),
 			},
 		},
 		websocket: {
 			onOpen(ws) {
-				if (!ws.data || !(ws.data as any)["react_hmr"]) return;
+				const data = ws.data as { react_hmr?: boolean } | undefined;
+				if (!data?.react_hmr) return;
 				wsList.push(ws);
 			},
 			onClose(ws) {
@@ -293,17 +402,31 @@ export default function applyReactPluginToHTML(
 		fileSystemWatchDir: enableHMR ? [route] : undefined,
 		onFileSystemChange(_ev, _fname, absolutePath) {
 			console.log(`[Apply-React] File change detected: ${absolutePath}`);
-			if (!absolutePath.startsWith(route) || getBuilder()?.isBuilding()) return;
-			const rel = relative(route, absolutePath);
-			const pathname = filePathToPathname(rel);
-			currentDevRoute = fileRouter.match(pathname);
-			getBuilder()?.build();
+			const routePathname = getRoutePathnameFromFileChange(
+				cwd,
+				routeDir,
+				absolutePath,
+			);
+			if (!routePathname) return;
+			const matchedRoute = fileRouter.match(routePathname);
+
+			if (!matchedRoute) return;
+
+			sendHMRMessage({
+				type: "route-build-started",
+				pathname: matchedRoute.pathname,
+				routeName: matchedRoute.name,
+			});
+			queueDevRouteBuild({ pathname: matchedRoute.pathname, matchedRoute });
+			void runQueuedDevBuilds();
 		},
 		router: {
 			async before_request(master) {
 				const acceptHeader = master.request.headers.get("accept") || "";
 				if (!acceptHeader.includes("text/html") || !currentDevRoute) return;
 				currentDevRoute = null;
+				queuedDevRoute = null;
+				pendingRouteUpdate = null;
 				if (master.builder.isBuilding()) return;
 				await master.builder.build();
 			},
@@ -329,6 +452,25 @@ export default function applyReactPluginToHTML(
 			},
 		},
 	};
+}
+
+export function getRoutePathnameFromFileChange(
+	projectRoot: string,
+	routeDir: string,
+	changedPath: string,
+) {
+	const normalizedPath = resolve(projectRoot, changedPath);
+	const relativePath = relative(routeDir, normalizedPath);
+
+	if (
+		!relativePath ||
+		relativePath.startsWith("..") ||
+		isAbsolute(relativePath)
+	) {
+		return null;
+	}
+
+	return filePathToPathname(relativePath);
 }
 
 function filePathToPathname(fp: string) {

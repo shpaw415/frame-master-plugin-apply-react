@@ -1,17 +1,10 @@
 {
-    "extends": "../tsconfig.json",
-    "compilerOptions": {
-        "paths": {
-            "@apply-react/*": [
-                "./stubs/*"
-            ],
-            "*": [
-                "./*"
-            ]
-        }
-    },
-    "include": [
-        ".",
-        "../src"
-    ]
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"paths": {
+			"@apply-react/*": ["./stubs/*"],
+			"*": ["./*"]
+		}
+	},
+	"include": [".", "../src"]
 }

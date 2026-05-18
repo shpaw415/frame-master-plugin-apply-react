@@ -1,10 +1,10 @@
 import _ROUTES_ from "@apply-react/client-routes.ts";
 import Shell from "@apply-react/client-shell.tsx";
+import ApplyReactPluginOptions from "@apply-react/props.ts";
 import { StrictMode } from "react";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import { getRelatedLayoutEntriesFromPathname, WrapWithLayouts } from "./layout";
 import { router, setInitialRouteSnapshot } from "./router";
-import ApplyReactPluginOptions from "@apply-react/props.ts";
-import { createRoot, hydrateRoot } from "react-dom/client";
 
 if (document.readyState !== "loading") {
 	Hydrate();
