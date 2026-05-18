@@ -1,4 +1,11 @@
+import FallbackDefault404 from "@apply-react/404.tsx";
 import _ROUTES_ from "@apply-react/client-routes.ts";
+import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
+import FallbackDefaultLoading from "@apply-react/loading.tsx";
+import {
+	FileSystemRouter,
+	type MatchedRoute,
+} from "bun-file-system-router-browser";
 import {
 	Component,
 	type JSX,
@@ -7,21 +14,14 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { setupHMR } from "./HMR";
+import { requestDevRouteBuild, setupHMR } from "./HMR";
 import {
-	type LayoutEntry,
 	getRelatedLayoutEntriesFromPathname,
 	LayoutCache,
+	type LayoutEntry,
 	WrapWithLayouts,
 } from "./layout";
 import { getLocationHref, isSameLocation, NotFoundError } from "./utils";
-import FallbackDefault404 from "@apply-react/404.tsx";
-import FallbackDefaultLoading from "@apply-react/loading.tsx";
-import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
-import {
-	FileSystemRouter,
-	type MatchedRoute,
-} from "bun-file-system-router-browser";
 
 export const router = new FileSystemRouter({
 	routes: Object.keys(_ROUTES_),
@@ -53,6 +53,36 @@ export const defaultErrorResolvers: ErrorFallbackResolver[] = [
 ];
 
 type PageComponent = () => JSX.Element;
+
+type RouteResolution =
+	| {
+			status: "ready";
+			Page: PageComponent;
+	  }
+	| {
+			status: "not-found";
+			Page: PageComponent;
+	  }
+	| {
+			status: "awaiting-dev-build";
+			matched: MatchedRoute;
+	  };
+
+type PendingDevRoute = {
+	pathname: string;
+	routeName: string;
+	navigationId: number;
+};
+
+type BuildNoticeState = {
+	pathname: string;
+	visible: boolean;
+} | null;
+
+export type DevBuildNotifierProps = {
+	pathname: string | null;
+	visible: boolean;
+};
 
 type InitialRouteSnapshot = {
 	pathname: string;
@@ -124,6 +154,8 @@ export type RouterHostProps = {
 	errorResolvers?: ErrorFallbackResolver[];
 	/** Callback invoked on every route change. */
 	onRouteChange?: (route: MatchedRoute) => void | Promise<void>;
+	/** Custom component rendered while a dev-only route build is pending. */
+	buildNotifier?: (props: DevBuildNotifierProps) => JSX.Element | null;
 };
 
 /**
@@ -143,6 +175,7 @@ export function RouterHost({
 	children,
 	errorResolvers = defaultErrorResolvers,
 	onRouteChange,
+	buildNotifier: BuildNotifier = DefaultBuildNotifier,
 }: RouterHostProps) {
 	const initialSnapshot =
 		typeof window === "undefined"
@@ -151,28 +184,114 @@ export function RouterHost({
 				? initialRouteSnapshot
 				: null;
 	const navigationRef = useRef(0);
+	const pendingDevRouteRef = useRef<PendingDevRoute | null>(null);
+	const buildNoticeTimeoutRef = useRef<number | null>(null);
 	const [pageKey, setPageKey] = useState(0);
 	const [activeLayouts, setActiveLayouts] = useState<LayoutEntry[]>(
 		() => initialSnapshot?.layouts ?? [],
 	);
-	const createPage = useCallback(
-		async (_pathname: string, routes: typeof _ROUTES_) => {
-			const matched = router.match(_pathname);
+	const [buildNotice, setBuildNotice] = useState<BuildNoticeState>(null);
+	const showBuildNotice = useCallback((pathname: string) => {
+		if (buildNoticeTimeoutRef.current) {
+			window.clearTimeout(buildNoticeTimeoutRef.current);
+			buildNoticeTimeoutRef.current = null;
+		}
+
+		setBuildNotice({ pathname, visible: true });
+	}, []);
+	const hideBuildNotice = useCallback(() => {
+		setBuildNotice((current) => {
+			if (!current) return current;
+			return { ...current, visible: false };
+		});
+
+		if (buildNoticeTimeoutRef.current) {
+			window.clearTimeout(buildNoticeTimeoutRef.current);
+		}
+
+		buildNoticeTimeoutRef.current = window.setTimeout(() => {
+			setBuildNotice(null);
+			buildNoticeTimeoutRef.current = null;
+		}, 240);
+	}, []);
+	const resolveRoute = useCallback(
+		async (
+			pathname: string,
+			routes: typeof _ROUTES_,
+		): Promise<RouteResolution> => {
+			const matched = router.match(pathname);
 			if (!matched) {
-				console.error("No route matched for pathname:", _pathname);
+				console.error("No route matched for pathname:", pathname);
 				console.error("Available routes:", routes);
-				return await getNotFoundComponent(_pathname);
+				return {
+					status: "not-found",
+					Page: await getNotFoundComponent(pathname),
+				};
 			}
-			const Page = await routes[matched.name]?.();
 
-			if (!Page) return await getNotFoundComponent(_pathname);
+			const importer = routes[matched.name];
+			if (!importer) {
+				return HMR_ENABLED
+					? { status: "awaiting-dev-build", matched }
+					: {
+							status: "not-found",
+							Page: await getNotFoundComponent(pathname),
+						};
+			}
 
-			return () => <Page />;
+			try {
+				const Page = await importer();
+				if (!Page) {
+					return {
+						status: "not-found",
+						Page: await getNotFoundComponent(pathname),
+					};
+				}
+
+				return {
+					status: "ready",
+					Page: () => <Page />,
+				};
+			} catch (error) {
+				if (HMR_ENABLED && isMissingRouteModuleError(error)) {
+					return { status: "awaiting-dev-build", matched };
+				}
+
+				throw error;
+			}
 		},
 		[],
 	);
 	const [CurrentPage, _setCurrentPage] = useState<PageComponent>(
 		() => initialSnapshot?.Page ?? (() => children),
+	);
+	const setNotFoundPage = useCallback(
+		async (pathname: string, navigationId: number) => {
+			pendingDevRouteRef.current = null;
+			hideBuildNotice();
+			setActiveLayouts([]);
+			const NotFoundPage = await getNotFoundComponent(pathname);
+			if (navigationRef.current !== navigationId) return;
+			_setCurrentPage(() => NotFoundPage);
+			setPageKey(navigationId);
+		},
+		[hideBuildNotice],
+	);
+	const requestPendingRouteBuild = useCallback(
+		async (matched: MatchedRoute, navigationId: number) => {
+			pendingDevRouteRef.current = {
+				pathname: matched.pathname,
+				routeName: matched.name,
+				navigationId,
+			};
+			showBuildNotice(matched.pathname);
+
+			const result = await requestDevRouteBuild(matched.pathname);
+			if (result.status === "missing") {
+				await setNotFoundPage(result.pathname, navigationId);
+			}
+		},
+		[setNotFoundPage, showBuildNotice],
 	);
 	const setCurrentPage = useCallback<
 		(pathname: string, routes: typeof _ROUTES_) => void
@@ -184,11 +303,7 @@ export function RouterHost({
 			const matched = router.match(pathname);
 
 			if (!matched) {
-				setActiveLayouts([]);
-				const NotFoundPage = await getNotFoundComponent(pathname);
-				if (navigationRef.current !== navigationId) return;
-				_setCurrentPage(() => NotFoundPage);
-				setPageKey(navigationId);
+				await setNotFoundPage(pathname, navigationId);
 				return;
 			}
 
@@ -202,11 +317,34 @@ export function RouterHost({
 			setPageKey(navigationId);
 			await onRouteChange?.(matched as MatchedRoute);
 			if (navigationRef.current !== navigationId) return;
-			const PageElement = await createPage(pathname, routes);
+			const resolvedRoute = await resolveRoute(pathname, routes);
 			if (navigationRef.current !== navigationId) return;
-			_setCurrentPage(() => PageElement);
+
+			switch (resolvedRoute.status) {
+				case "ready":
+					pendingDevRouteRef.current = null;
+					hideBuildNotice();
+					_setCurrentPage(() => resolvedRoute.Page);
+					return;
+				case "not-found":
+					pendingDevRouteRef.current = null;
+					hideBuildNotice();
+					_setCurrentPage(() => resolvedRoute.Page);
+					return;
+				case "awaiting-dev-build":
+					await requestPendingRouteBuild(resolvedRoute.matched, navigationId);
+					return;
+				default:
+					return;
+			}
 		},
-		[createPage, onRouteChange],
+		[
+			hideBuildNotice,
+			onRouteChange,
+			requestPendingRouteBuild,
+			resolveRoute,
+			setNotFoundPage,
+		],
 	);
 	const [routes, setRoutes] = useState(
 		typeof window === "undefined" ? {} : _ROUTES_,
@@ -225,18 +363,47 @@ export function RouterHost({
 	useEffect(
 		() =>
 			HMR_ENABLED
-				? setupHMR((newRoutes) => {
-						LayoutCache.clear();
-						setRoutes((curr) => {
-							setCurrentPage(window.location.pathname, {
-								...curr,
-								[newRoutes.pathname]: newRoutes.component,
+				? setupHMR({
+						onRouteBuildStarted: ({ pathname, routeName }) => {
+							const pendingRoute = pendingDevRouteRef.current;
+							if (!pendingRoute || pendingRoute.routeName !== routeName) return;
+							showBuildNotice(pathname);
+						},
+						onRoutesUpdate: (newRoutes) => {
+							LayoutCache.clear();
+							setRoutes((curr) => {
+								const nextRoutes = {
+									...curr,
+									[newRoutes.routeName]: newRoutes.component,
+								};
+								const pendingRoute = pendingDevRouteRef.current;
+								if (pendingRoute?.routeName === newRoutes.routeName) {
+									pendingDevRouteRef.current = null;
+									setCurrentPage(pendingRoute.pathname, nextRoutes);
+								} else {
+									setCurrentPage(window.location.pathname, nextRoutes);
+								}
+
+								return nextRoutes;
 							});
-							return { ...curr, [newRoutes.pathname]: newRoutes.component };
-						});
+						},
+						onRouteBuildMissing: ({ pathname }) => {
+							const pendingRoute = pendingDevRouteRef.current;
+							if (!pendingRoute || pendingRoute.pathname !== pathname) return;
+							void setNotFoundPage(pathname, pendingRoute.navigationId);
+						},
 					})
 				: undefined,
-		[setCurrentPage],
+		[setCurrentPage, setNotFoundPage, showBuildNotice],
+	);
+
+	useEffect(
+		() => () => {
+			if (buildNoticeTimeoutRef.current) {
+				window.clearTimeout(buildNoticeTimeoutRef.current);
+			}
+		},
+		[],
 	);
 
 	useEffect(() => {
@@ -297,28 +464,25 @@ export function RouterHost({
 
 			e.preventDefault();
 
-			// Check if route exists
-			if (routes[matched.name]) {
-				// Update browser history with full URL including hash
-				if (nextLocation !== currentLocation) {
-					window.history.pushState(null, "", nextLocation);
-				}
-				// Update current page
-				setCurrentPage(url.pathname, routes);
+			// Update browser history with full URL including hash
+			if (nextLocation !== currentLocation) {
+				window.history.pushState(null, "", nextLocation);
+			}
+			// Update current page
+			setCurrentPage(url.pathname, routes);
 
-				// Handle hash scrolling after navigation
-				if (url.hash) {
-					// Use requestAnimationFrame to ensure the element is rendered
-					requestAnimationFrame(() => {
-						const element = document.getElementById(url.hash.slice(1));
-						if (element) {
-							element.scrollIntoView({ behavior: "smooth" });
-						}
-					});
-				} else {
-					// Scroll to top if no hash
-					window.scrollTo(0, 0);
-				}
+			// Handle hash scrolling after navigation
+			if (url.hash) {
+				// Use requestAnimationFrame to ensure the element is rendered
+				requestAnimationFrame(() => {
+					const element = document.getElementById(url.hash.slice(1));
+					if (element) {
+						element.scrollIntoView({ behavior: "smooth" });
+					}
+				});
+			} else {
+				// Scroll to top if no hash
+				window.scrollTo(0, 0);
 			}
 		};
 
@@ -332,17 +496,23 @@ export function RouterHost({
 	}, [routes, setCurrentPage]);
 
 	return (
-		<WrapWithLayouts layouts={activeLayouts}>
-			<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
-				<CurrentPage />
-			</ErrorWrapper>
-		</WrapWithLayouts>
+		<>
+			<WrapWithLayouts layouts={activeLayouts}>
+				<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
+					<CurrentPage />
+				</ErrorWrapper>
+			</WrapWithLayouts>
+			<BuildNotifier
+				pathname={buildNotice?.pathname ?? null}
+				visible={buildNotice?.visible ?? false}
+			/>
+		</>
 	);
 }
 
 async function getLoadingComponent(pathname: string) {
 	// look for a loading.tsx at the same directory level as the requested page
-	const pathnameToLoading = pathname.replace(/\/?[^\/]*$/, "/loading");
+	const pathnameToLoading = pathname.replace(/\/?[^/]*$/, "/loading");
 	const siblingLoader = _ROUTES_[pathnameToLoading];
 	const LoadingPage = siblingLoader
 		? ((await siblingLoader?.()) ?? FallbackDefaultLoading)
@@ -352,10 +522,103 @@ async function getLoadingComponent(pathname: string) {
 
 async function getNotFoundComponent(pathname: string) {
 	// must fit the same level as the requested page, so we replace the last segment with 404
-	const pathnameTo404 = pathname.replace(/\/?[^\/]*$/, "/404");
+	const pathnameTo404 = pathname.replace(/\/?[^/]*$/, "/404");
 	const sibling404 = _ROUTES_[pathnameTo404];
 	const NotFoundPage = sibling404
 		? ((await sibling404?.()) ?? FallbackDefault404)
 		: FallbackDefault404;
 	return () => <NotFoundPage />;
+}
+
+function isMissingRouteModuleError(error: unknown) {
+	if (!(error instanceof Error)) return false;
+
+	const message = error.message.toLowerCase();
+	return (
+		message.includes("module not found") ||
+		message.includes("cannot find module") ||
+		message.includes("failed to fetch dynamically imported module") ||
+		(message.includes("import") && message.includes("404")) ||
+		(message.includes("import") && message.includes("not found"))
+	);
+}
+
+function DefaultBuildNotifier({ pathname, visible }: DevBuildNotifierProps) {
+	if (!pathname) return null;
+
+	return (
+		<>
+			<style>{`
+				@keyframes _ar_spin {
+					to { transform: rotate(360deg); }
+				}
+			`}</style>
+			<div
+				aria-live="polite"
+				role="status"
+				style={{
+					position: "fixed",
+					bottom: "1.5rem",
+					right: "1.5rem",
+					zIndex: 9999,
+					display: "flex",
+					alignItems: "center",
+					gap: "0.55rem",
+					padding: "0.5rem 0.85rem 0.5rem 0.6rem",
+					borderRadius: "999px",
+					border: "1px solid rgba(255,255,255,0.08)",
+					background: "rgba(15, 17, 21, 0.82)",
+					boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
+					color: "rgba(226, 232, 240, 0.88)",
+					fontSize: "0.8rem",
+					letterSpacing: "0.01em",
+					fontFamily: "system-ui, sans-serif",
+					backdropFilter: "blur(10px)",
+					transform: visible
+						? "translateY(0)"
+						: "translateY(calc(100% + 1.5rem))",
+					opacity: visible ? 1 : 0,
+					transition:
+						"transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease",
+					pointerEvents: "none",
+					userSelect: "none",
+				}}
+			>
+				<svg
+					aria-hidden="true"
+					width="13"
+					height="13"
+					viewBox="0 0 13 13"
+					fill="none"
+					style={{ animation: "_ar_spin 0.9s linear infinite", flexShrink: 0 }}
+				>
+					<circle
+						cx="6.5"
+						cy="6.5"
+						r="5.5"
+						stroke="rgba(226,232,240,0.22)"
+						strokeWidth="1.5"
+					/>
+					<path
+						d="M6.5 1A5.5 5.5 0 0 1 12 6.5"
+						stroke="rgba(148,163,184,0.9)"
+						strokeWidth="1.5"
+						strokeLinecap="round"
+					/>
+				</svg>
+				<span>
+					Building{" "}
+					<span
+						style={{
+							color: "rgba(255,255,255,0.65)",
+							fontFamily: "ui-monospace, monospace",
+							fontSize: "0.77rem",
+						}}
+					>
+						{pathname}
+					</span>
+				</span>
+			</div>
+		</>
+	);
 }

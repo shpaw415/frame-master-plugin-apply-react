@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { createElement, type JSX } from "react";
 import { renderToString } from "react-dom/server";
-import { ErrorWrapper, type ErrorFallbackResolver } from "../src/router";
+import { type ErrorFallbackResolver, ErrorWrapper } from "../src/router";
 import { NotFoundError } from "../src/utils";
 
 // ---------------------------------------------------------------------------

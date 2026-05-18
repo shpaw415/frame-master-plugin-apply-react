@@ -1,6 +1,6 @@
 import type { FrameMasterConfig } from "frame-master/server/types";
-import ApplyReact from "./src";
 import ServeFromBuild from "frame-master-plugin-serve-from-build";
+import ApplyReact from "./src";
 
 const indexContent = await Bun.file("test/src/index.html").text();
 

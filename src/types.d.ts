@@ -27,8 +27,36 @@ declare module "@apply-react/props.ts" {
 	export default ApplyReactPluginOptions;
 }
 
-declare type HMRMessage = {
+declare type RouteUpdateMessage = {
 	type: "update-routes";
 	route: string;
 	pathname: string;
+	routeName: string;
 };
+
+declare type RouteBuildStartedMessage = {
+	type: "route-build-started";
+	pathname: string;
+	routeName: string;
+};
+
+declare type RouteBuildMissingMessage = {
+	type: "route-build-missing";
+	pathname: string;
+};
+
+declare type HMRMessage =
+	| RouteUpdateMessage
+	| RouteBuildStartedMessage
+	| RouteBuildMissingMessage;
+
+declare type DevRouteBuildResponse =
+	| {
+			status: "building";
+			pathname: string;
+			routeName: string;
+	  }
+	| {
+			status: "missing";
+			pathname: string;
+	  };

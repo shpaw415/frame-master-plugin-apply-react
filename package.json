@@ -21,7 +21,7 @@
 		"./utils": "./src/utils.ts"
 	},
 	"scripts": {
-		"dev": "NODE_ENV=development bun --hot frame-master dev",
+		"dev": "NODE_ENV=development bun frame-master dev",
 		"start": "NODE_ENV=production bun frame-master start",
 		"build:dev": "NODE_ENV=development bun frame-master build",
 		"build": "NODE_ENV=production bun frame-master build",
