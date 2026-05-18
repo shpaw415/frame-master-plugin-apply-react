@@ -143,9 +143,7 @@ describe("ErrorWrapper.componentDidCatch", () => {
 	test("passes the thrown error and current pathname to each resolver", async () => {
 		const error = new NotFoundError();
 		const pathname = "/users/42";
-		(globalThis as unknown as { location: { pathname: string } }).location = {
-			pathname,
-		};
+		window.history.replaceState(null, "", pathname);
 
 		const resolver: ErrorFallbackResolver = mock(async () => FallbackPage);
 		const instance = new ErrorWrapper({
@@ -163,9 +161,7 @@ describe("ErrorWrapper.componentDidCatch", () => {
 		);
 
 		// Restore
-		(globalThis as unknown as { location: { pathname: string } }).location = {
-			pathname: "/",
-		};
+		window.history.replaceState(null, "", "/");
 	});
 
 	test("custom error type resolver stops chain on match", async () => {

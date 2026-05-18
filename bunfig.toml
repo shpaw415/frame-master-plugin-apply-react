@@ -1,1 +1,3 @@
 preload = ["./.frame-master/preload.ts"]
+[test]
+preload = "./test/setup.ts"

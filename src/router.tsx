@@ -14,7 +14,7 @@ import {
 	LayoutCache,
 	WrapWithLayouts,
 } from "./layout";
-import { NotFoundError } from "./utils";
+import { getLocationHref, isSameLocation, NotFoundError } from "./utils";
 import FallbackDefault404 from "@apply-react/404.tsx";
 import FallbackDefaultLoading from "@apply-react/loading.tsx";
 import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
@@ -254,7 +254,6 @@ export function RouterHost({
 			if (!anchor?.href || anchor.target === "_blank") return;
 
 			const url = new URL(anchor.href);
-			const nextLocation = getLocationHref(url);
 			const currentLocation = getLocationHref(window.location);
 
 			// Only handle internal links (same origin)
@@ -262,6 +261,12 @@ export function RouterHost({
 
 			const matched = router.match(url.pathname);
 			if (!matched) {
+				const nextLocation = getLocationHref(url);
+				if (nextLocation === currentLocation) {
+					e.preventDefault();
+					return;
+				}
+
 				e.preventDefault();
 				console.log("not found no match for url:", url.pathname);
 				if (nextLocation !== currentLocation) {
@@ -273,6 +278,12 @@ export function RouterHost({
 			}
 
 			url.pathname = matched.pathname;
+			const nextLocation = getLocationHref(url);
+
+			if (isSameLocation(window.location, url)) {
+				e.preventDefault();
+				return;
+			}
 
 			// Handle hash-only links (anchors on the same page)
 			if (
@@ -337,10 +348,6 @@ async function getLoadingComponent(pathname: string) {
 		? ((await siblingLoader?.()) ?? FallbackDefaultLoading)
 		: FallbackDefaultLoading;
 	return () => <LoadingPage />;
-}
-
-function getLocationHref(location: Pick<URL, "pathname" | "search" | "hash">) {
-	return location.pathname + location.search + location.hash;
 }
 
 async function getNotFoundComponent(pathname: string) {

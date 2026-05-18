@@ -9,8 +9,7 @@ import {
 } from "../src/layout";
 import { RouterHost, setInitialRouteSnapshot } from "../src/router";
 
-const describeRouterHost =
-	typeof document === "undefined" ? describe.skip : describe;
+const describeRouterHost = describe;
 
 function flushNavigation() {
 	return new Promise((resolve) => setTimeout(resolve, 0));
@@ -28,13 +27,29 @@ function findLink(href: string) {
 	) as HTMLAnchorElement | undefined;
 }
 
+function setInputValue(input: HTMLInputElement, value: string) {
+	const valueSetter = Object.getOwnPropertyDescriptor(
+		HTMLInputElement.prototype,
+		"value",
+	)?.set;
+
+	if (!valueSetter) {
+		throw new Error("Missing HTMLInputElement value setter");
+	}
+
+	valueSetter.call(input, value);
+	input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 describeRouterHost("RouterHost shared layouts", () => {
 	let root: Root | undefined;
 	let container: HTMLDivElement;
+	let routeChangeCount: number;
 
 	beforeEach(async () => {
 		LayoutCache.clear();
 		setInitialRouteSnapshot(null);
+		routeChangeCount = 0;
 		document.body.innerHTML = '<div id="root"></div>';
 		container = document.getElementById("root") as HTMLDivElement;
 		window.history.replaceState(null, "", "/");
@@ -49,7 +64,12 @@ describeRouterHost("RouterHost shared layouts", () => {
 		await act(async () => {
 			root = createRoot(container);
 			root.render(
-				<RouterHost onRouteChange={() => Promise.resolve()}>
+				<RouterHost
+					onRouteChange={() => {
+						routeChangeCount += 1;
+						return Promise.resolve();
+					}}
+				>
 					<HomePage />
 				</RouterHost>,
 			);
@@ -76,9 +96,7 @@ describeRouterHost("RouterHost shared layouts", () => {
 		if (!input) throw new Error("Missing shared layout input");
 
 		await act(async () => {
-			input.value = "kept across navigation";
-			input.dispatchEvent(new Event("input", { bubbles: true }));
-			input.dispatchEvent(new Event("change", { bubbles: true }));
+			setInputValue(input, "kept across navigation");
 			await flushNavigation();
 		});
 
@@ -107,9 +125,7 @@ describeRouterHost("RouterHost shared layouts", () => {
 		if (!input) throw new Error("Missing shared layout input");
 
 		await act(async () => {
-			input.value = "kept after fallback";
-			input.dispatchEvent(new Event("input", { bubbles: true }));
-			input.dispatchEvent(new Event("change", { bubbles: true }));
+			setInputValue(input, "kept after fallback");
 			await flushNavigation();
 		});
 
@@ -149,5 +165,27 @@ describeRouterHost("RouterHost shared layouts", () => {
 		expect(document.body.textContent).toContain("Main Page");
 		expect(document.body.textContent).not.toContain("Default Not Found");
 		expect(getInput()?.value).toBe("kept after fallback");
+	});
+
+	test("does not re-navigate when clicking a link to the current location", async () => {
+		const homeLink = findLink("/");
+		expect(homeLink).toBeDefined();
+		if (!homeLink) throw new Error("Missing / link");
+
+		await act(async () => {
+			homeLink.dispatchEvent(
+				new MouseEvent("click", {
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await flushNavigation();
+			await flushNavigation();
+		});
+
+		expect(routeChangeCount).toBe(0);
+		expect(document.body.textContent).toContain("Main Page");
+		expect(document.body.textContent).not.toContain("Default Loading");
+		expect(window.location.pathname).toBe("/");
 	});
 });
