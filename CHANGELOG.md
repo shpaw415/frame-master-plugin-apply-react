@@ -8,6 +8,8 @@
 - Deduplicated dev-route build queue with deterministic processing order under burst edits.
 - HMR client safeguards for malformed websocket payloads and callback failures.
 - Graceful full-page reload fallback when a hot-updated route module fails to import.
+- New plugin option `watchDirectories` to control which directories are watched for HMR changes.
+- New plugin option `watchDirectoriesExclude` to exclude directories from HMR watching and override included watch directories.
 
 ### Changed
 

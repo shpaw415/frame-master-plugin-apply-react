@@ -192,6 +192,23 @@ export type ApplyReactPluginOptions = {
 	enableHMR?: boolean;
 
 	/**
+	 * Directories to watch for HMR file changes.
+	 *
+	 * Relative paths are resolved from the project root.
+	 *
+	 * @default [".", "node_modules"]
+	 */
+	watchDirectories?: string[];
+
+	/**
+	 * Directories to exclude from HMR watching.
+	 *
+	 * Excludes are applied after `watchDirectories`, so exclusions always win.
+	 * Relative paths are resolved from the project root.
+	 */
+	watchDirectoriesExclude?: string[];
+
+	/**
 	 * Hydration method to use on the client
 	 *
 	 * - `"hydrate"`: Attaches event listeners to existing server-rendered HTML (default)
@@ -222,6 +239,39 @@ export type ApplyReactPluginOptions = {
 		defaultLoadingComponentPath?: string;
 	}>;
 };
+
+export function resolveWatchDirectories(
+	enableHMR: boolean,
+	watchDirectories?: string[],
+	watchDirectoriesExclude?: string[],
+) {
+	if (!enableHMR) return undefined;
+	const includeDirectories = watchDirectories ?? [".", "node_modules"];
+
+	const cleanedDirectories = includeDirectories
+		.map((directory) => directory.trim())
+		.filter((directory) => directory.length > 0);
+
+	const uniqueDirectories = [...new Set(cleanedDirectories)];
+	if (uniqueDirectories.length === 0) return undefined;
+
+	if (!watchDirectoriesExclude || watchDirectoriesExclude.length === 0) {
+		return uniqueDirectories;
+	}
+
+	const excludedDirectories = new Set(
+		watchDirectoriesExclude
+			.map((directory) => directory.trim())
+			.filter((directory) => directory.length > 0),
+	);
+
+	const resolvedDirectories = uniqueDirectories.filter(
+		(directory) => !excludedDirectories.has(directory),
+	);
+
+	if (resolvedDirectories.length === 0) return undefined;
+	return resolvedDirectories;
+}
 
 /**
  * Apply React Plugin for Frame Master
@@ -266,6 +316,8 @@ export default function applyReactPluginToHTML(
 		style,
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
+		watchDirectories,
+		watchDirectoriesExclude,
 		entrypointExtensions = [".tsx", ".jsx"],
 		fallbacks = {},
 		hydration = "hydrate",
@@ -292,6 +344,11 @@ export default function applyReactPluginToHTML(
 	];
 	const wsList: Bun.ServerWebSocket[] = [];
 	const routeDir = join(cwd, route);
+	const watchDirectoriesResolved = resolveWatchDirectories(
+		enableHMR,
+		watchDirectories,
+		watchDirectoriesExclude,
+	);
 	let liveBuilder: Builder | null = null;
 
 	const toRoutePath = (fp: string) =>
@@ -621,7 +678,7 @@ export default function applyReactPluginToHTML(
 				}
 			},
 		},
-		fileSystemWatchDir: enableHMR ? [".", "node_modules"] : undefined,
+		fileSystemWatchDir: watchDirectoriesResolved,
 		onFileSystemChange(_ev, _fname, absolutePath) {
 			const changedAbsolutePath = normalizeWatchedFilePath(cwd, absolutePath);
 			const routePathname = getRoutePathnameFromFileChange(

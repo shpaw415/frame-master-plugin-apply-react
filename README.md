@@ -106,13 +106,15 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 
 ## Configuration Options
 
-| Option            | Type        | Default     | Description                                                 |
-| ----------------- | ----------- | ----------- | ----------------------------------------------------------- |
-| `style`           | `"nextjs"`  | -           | Routing convention style (currently supports Next.js style) |
-| `route`           | `string`    | -           | Base path to your routes directory                          |
-| `clientShellPath` | `string?`   | -           | Optional path to a custom client-side shell component       |
-| `enableHMR`       | `boolean`   | `true`      | Enable Hot Module Replacement for development               |
-| `hydration`       | `"hydrate"` | `"hydrate"` | Hydration method to use on the client                       |
+| Option                    | Type        | Default                 | Description                                                              |
+| ------------------------- | ----------- | ----------------------- | ------------------------------------------------------------------------ |
+| `style`                   | `"nextjs"`  | -                       | Routing convention style (currently supports Next.js style)              |
+| `route`                   | `string`    | -                       | Base path to your routes directory                                       |
+| `clientShellPath`         | `string?`   | -                       | Optional path to a custom client-side shell component                    |
+| `enableHMR`               | `boolean`   | `true`                  | Enable Hot Module Replacement for development                            |
+| `watchDirectories`        | `string[]?` | `['.', 'node_modules']` | Directories watched for HMR file changes (project-root relative)         |
+| `watchDirectoriesExclude` | `string[]?` | -                       | Directories excluded from HMR watching; applied after `watchDirectories` |
+| `hydration`               | `"hydrate"` | `"hydrate"`             | Hydration method to use on the client                                    |
 
 ## How It Works
 
@@ -202,9 +204,7 @@ const myResolvers: ErrorFallbackResolver[] = [
 ];
 
 export default function ClientShell({ children }: { children: JSX.Element }) {
-  return (
-    <RouterHost errorResolvers={myResolvers}>{children}</RouterHost>
-  );
+  return <RouterHost errorResolvers={myResolvers}>{children}</RouterHost>;
 }
 ```
 
