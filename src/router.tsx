@@ -371,10 +371,19 @@ export function RouterHost({
 						},
 						onRoutesUpdate: (newRoutes) => {
 							LayoutCache.clear();
+							const safeComponentLoader = () =>
+								newRoutes.component().catch((error) => {
+									console.error(
+										"[Apply-React HMR] Failed to import hot route update, reloading page",
+										error,
+									);
+									window.location.reload();
+									throw error;
+								});
 							setRoutes((curr) => {
 								const nextRoutes = {
 									...curr,
-									[newRoutes.routeName]: newRoutes.component,
+									[newRoutes.routeName]: safeComponentLoader,
 								};
 								const pendingRoute = pendingDevRouteRef.current;
 								if (pendingRoute?.routeName === newRoutes.routeName) {

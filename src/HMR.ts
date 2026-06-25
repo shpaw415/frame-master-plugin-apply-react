@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 
-let ws: WebSocket;
+let ws: WebSocket | undefined;
 
 type RouteUpdatePayload = {
 	pathname: string;
@@ -18,8 +18,48 @@ type SetupHMRCallbacks = {
 };
 
 function initializeWebSocket() {
-	if (ws) return;
+	if (
+		ws &&
+		ws.readyState !== WebSocket.CLOSED &&
+		ws.readyState !== WebSocket.CLOSING
+	) {
+		return;
+	}
 	ws = new WebSocket(`ws://${window.location.host}/_REACT_HMR/ws`);
+}
+
+function isRouteBuildStartedMessage(
+	message: unknown,
+): message is RouteBuildStartedMessage {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		(message as RouteBuildStartedMessage).type === "route-build-started" &&
+		typeof (message as RouteBuildStartedMessage).pathname === "string" &&
+		typeof (message as RouteBuildStartedMessage).routeName === "string"
+	);
+}
+
+function isRouteBuildMissingMessage(
+	message: unknown,
+): message is RouteBuildMissingMessage {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		(message as RouteBuildMissingMessage).type === "route-build-missing" &&
+		typeof (message as RouteBuildMissingMessage).pathname === "string"
+	);
+}
+
+function isRouteUpdateMessage(message: unknown): message is RouteUpdateMessage {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		(message as RouteUpdateMessage).type === "update-routes" &&
+		typeof (message as RouteUpdateMessage).pathname === "string" &&
+		typeof (message as RouteUpdateMessage).routeName === "string" &&
+		typeof (message as RouteUpdateMessage).route === "string"
+	);
 }
 
 /**
@@ -47,9 +87,16 @@ export function setupHMR(
 	}: SetupHMRCallbacks =
 		typeof callbacks === "function" ? { onRoutesUpdate: callbacks } : callbacks;
 	const handleMessage = async (event: MessageEvent) => {
-		const message = JSON.parse(event.data) as HMRMessage;
-		switch (message.type) {
-			case "update-routes":
+		let message: unknown;
+		try {
+			message = JSON.parse(event.data as string);
+		} catch {
+			console.warn("[Apply-React HMR] Received malformed websocket payload");
+			return;
+		}
+
+		try {
+			if (isRouteUpdateMessage(message)) {
 				await onRoutesUpdate({
 					pathname: message.pathname,
 					routeName: message.routeName,
@@ -58,24 +105,28 @@ export function setupHMR(
 							`/@apply-react/routes/${message.route}?t=${Date.now()}`
 						).then((mod) => mod.default as () => JSX.Element),
 				});
-				break;
-			case "route-build-started":
+				return;
+			}
+
+			if (isRouteBuildStartedMessage(message)) {
 				await onRouteBuildStarted?.({
 					pathname: message.pathname,
 					routeName: message.routeName,
 				});
-				break;
-			case "route-build-missing":
+				return;
+			}
+
+			if (isRouteBuildMissingMessage(message)) {
 				await onRouteBuildMissing?.({ pathname: message.pathname });
-				break;
-			default:
-				break;
+			}
+		} catch (error) {
+			console.error("[Apply-React HMR] Callback handling failed", error);
 		}
 	};
 
-	ws.addEventListener("message", handleMessage);
+	ws?.addEventListener("message", handleMessage);
 	return () => {
-		ws.removeEventListener("message", handleMessage);
+		ws?.removeEventListener("message", handleMessage);
 	};
 }
 

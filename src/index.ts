@@ -1,8 +1,170 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Builder } from "frame-master/build";
 import type { FrameMasterPlugin } from "frame-master/plugin";
 import { directiveManager, isProd } from "frame-master/utils";
 import { name, version } from "../package.json";
+
+const TRACKED_SOURCE_EXTENSIONS = new Set([
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mjs",
+	".cjs",
+	".mts",
+	".cts",
+	".json",
+	".css",
+	".scss",
+	".sass",
+	".less",
+]);
+
+const NON_RECURSIVE_EXTENSIONS = new Set([
+	".json",
+	".css",
+	".scss",
+	".sass",
+	".less",
+]);
+
+const IMPORT_SPECIFIER_PATTERNS = [
+	/(?:import|export)\s+(?:type\s+)?[\s\S]*?from\s+["']([^"']+)["']/g,
+	/import\s*["']([^"']+)["']/g,
+	/import\s*\(\s*["']([^"']+)["']\s*\)/g,
+	/require\s*\(\s*["']([^"']+)["']\s*\)/g,
+];
+
+export function extractImportSpecifiers(source: string): string[] {
+	const specifiers = new Set<string>();
+
+	for (const pattern of IMPORT_SPECIFIER_PATTERNS) {
+		for (const match of source.matchAll(pattern)) {
+			const specifier = match[1]?.trim();
+			if (!specifier) continue;
+			specifiers.add(specifier);
+		}
+	}
+
+	return [...specifiers];
+}
+
+function normalizeWatchedFilePath(projectRoot: string, filePath: string) {
+	return resolve(projectRoot, filePath);
+}
+
+function isWithinProject(projectRoot: string, filePath: string) {
+	const relativePath = relative(projectRoot, filePath);
+	return (
+		relativePath !== "" &&
+		!relativePath.startsWith("..") &&
+		!isAbsolute(relativePath)
+	);
+}
+
+function isIgnoredForDependencyTracking(projectRoot: string, filePath: string) {
+	if (!isWithinProject(projectRoot, filePath)) return true;
+	const relativePath = relative(projectRoot, filePath);
+	return (
+		relativePath.startsWith(".git/") ||
+		relativePath.startsWith(".frame-master/") ||
+		relativePath.startsWith("release-notes/")
+	);
+}
+
+function resolveWithKnownExtensions(candidatePath: string) {
+	if (existsSync(candidatePath)) return candidatePath;
+
+	for (const extension of TRACKED_SOURCE_EXTENSIONS) {
+		const withExtension = `${candidatePath}${extension}`;
+		if (existsSync(withExtension)) return withExtension;
+	}
+
+	for (const extension of TRACKED_SOURCE_EXTENSIONS) {
+		const asIndex = join(candidatePath, `index${extension}`);
+		if (existsSync(asIndex)) return asIndex;
+	}
+
+	return null;
+}
+
+function resolveImportSpecifier(
+	sourceFilePath: string,
+	specifier: string,
+	projectRoot: string,
+) {
+	if (specifier.startsWith("node:") || specifier.startsWith("bun:")) {
+		return null;
+	}
+
+	if (specifier.startsWith(".") || specifier.startsWith("/")) {
+		const fromSource = specifier.startsWith("/")
+			? resolve(projectRoot, `.${specifier}`)
+			: resolve(join(sourceFilePath, ".."), specifier);
+		return resolveWithKnownExtensions(fromSource);
+	}
+
+	try {
+		const resolvedUrl = import.meta.resolve(
+			specifier,
+			pathToFileURL(sourceFilePath).href,
+		);
+		if (!resolvedUrl.startsWith("file:")) return null;
+		return resolveWithKnownExtensions(fileURLToPath(resolvedUrl));
+	} catch {
+		return null;
+	}
+}
+
+async function collectFileDependencies(
+	entryFilePath: string,
+	projectRoot: string,
+) {
+	const stack = [entryFilePath];
+	const discovered = new Set<string>();
+
+	while (stack.length > 0) {
+		const current = stack.pop();
+		if (!current) continue;
+		const normalizedCurrent = normalizeWatchedFilePath(projectRoot, current);
+
+		if (discovered.has(normalizedCurrent)) continue;
+		if (isIgnoredForDependencyTracking(projectRoot, normalizedCurrent))
+			continue;
+
+		discovered.add(normalizedCurrent);
+
+		if (!existsSync(normalizedCurrent)) continue;
+		const extension = extname(normalizedCurrent);
+		if (!TRACKED_SOURCE_EXTENSIONS.has(extension)) continue;
+		if (NON_RECURSIVE_EXTENSIONS.has(extension)) continue;
+
+		let source: string;
+		try {
+			source = await readFile(normalizedCurrent, "utf8");
+		} catch {
+			continue;
+		}
+
+		const specifiers = extractImportSpecifiers(source);
+		for (const specifier of specifiers) {
+			const resolvedDependency = resolveImportSpecifier(
+				normalizedCurrent,
+				specifier,
+				projectRoot,
+			);
+			if (!resolvedDependency) continue;
+			if (isIgnoredForDependencyTracking(projectRoot, resolvedDependency))
+				continue;
+			stack.push(resolvedDependency);
+		}
+	}
+
+	return discovered;
+}
 
 /**
  * Configuration options for the Apply-React plugin
@@ -144,9 +306,13 @@ export default function applyReactPluginToHTML(
 	};
 
 	let currentDevRoute: DevBuildTarget | null = null;
-	let queuedDevRoute: DevBuildTarget | null = null;
+	const queuedDevRoutes: DevBuildTarget[] = [];
+	const queuedRouteNames = new Set<string>();
 	let pendingRouteUpdate: DevBuildTarget | null = null;
 	let selectiveBuildPromise: Promise<void> | null = null;
+	let refreshDependencyGraphPromise: Promise<void> | null = null;
+	let targetByRouteName = new Map<string, DevBuildTarget>();
+	let dependentRouteNamesByFilePath = new Map<string, Set<string>>();
 
 	const sendHMRMessage = (message: HMRMessage) => {
 		wsList.forEach((ws) => {
@@ -157,7 +323,65 @@ export default function applyReactPluginToHTML(
 	};
 
 	const queueDevRouteBuild = (target: DevBuildTarget) => {
-		queuedDevRoute = target;
+		const routeName = target.matchedRoute.name;
+		if (queuedRouteNames.has(routeName)) return;
+		queuedRouteNames.add(routeName);
+		queuedDevRoutes.push(target);
+	};
+
+	const scheduleDevRouteBuild = (target: DevBuildTarget) => {
+		sendHMRMessage({
+			type: "route-build-started",
+			pathname: target.pathname,
+			routeName: target.matchedRoute.name,
+		});
+		queueDevRouteBuild(target);
+	};
+
+	const collectDevBuildTargets = () => {
+		const targets: DevBuildTarget[] = [];
+		for (const pathname of Object.keys(fileRouter.routes)) {
+			const matchedRoute = fileRouter.match(pathname);
+			if (!matchedRoute) continue;
+			targets.push({
+				matchedRoute,
+				pathname: matchedRoute.pathname,
+			});
+		}
+		return targets;
+	};
+
+	const refreshDependencyGraph = async () => {
+		if (refreshDependencyGraphPromise) return refreshDependencyGraphPromise;
+
+		refreshDependencyGraphPromise = (async () => {
+			const nextTargetByRouteName = new Map<string, DevBuildTarget>();
+			const nextDependentRouteNamesByFilePath = new Map<string, Set<string>>();
+
+			const targets = collectDevBuildTargets();
+			for (const target of targets) {
+				nextTargetByRouteName.set(target.matchedRoute.name, target);
+				const routeFilePath = normalizeWatchedFilePath(
+					cwd,
+					target.matchedRoute.filePath,
+				);
+				const dependencies = await collectFileDependencies(routeFilePath, cwd);
+
+				for (const dependencyPath of dependencies) {
+					const routes =
+						nextDependentRouteNamesByFilePath.get(dependencyPath) ?? new Set();
+					routes.add(target.matchedRoute.name);
+					nextDependentRouteNamesByFilePath.set(dependencyPath, routes);
+				}
+			}
+
+			targetByRouteName = nextTargetByRouteName;
+			dependentRouteNamesByFilePath = nextDependentRouteNamesByFilePath;
+		})().finally(() => {
+			refreshDependencyGraphPromise = null;
+		});
+
+		return refreshDependencyGraphPromise;
 	};
 
 	const runQueuedDevBuilds = async () => {
@@ -165,9 +389,10 @@ export default function applyReactPluginToHTML(
 		if (!builder || selectiveBuildPromise) return selectiveBuildPromise;
 
 		selectiveBuildPromise = (async () => {
-			while (queuedDevRoute) {
-				const nextRoute = queuedDevRoute;
-				queuedDevRoute = null;
+			while (queuedDevRoutes.length > 0) {
+				const nextRoute = queuedDevRoutes.shift();
+				if (!nextRoute) continue;
+				queuedRouteNames.delete(nextRoute.matchedRoute.name);
 
 				const activeBuild = builder.awaitBuildFinish();
 				if (builder.isBuilding() && activeBuild) {
@@ -184,7 +409,7 @@ export default function applyReactPluginToHTML(
 			})
 			.finally(() => {
 				selectiveBuildPromise = null;
-				if (queuedDevRoute) {
+				if (queuedDevRoutes.length > 0) {
 					void runQueuedDevBuilds();
 				}
 			});
@@ -214,12 +439,7 @@ export default function applyReactPluginToHTML(
 			pathname: matchedRoute.pathname,
 		} satisfies DevBuildTarget;
 
-		sendHMRMessage({
-			type: "route-build-started",
-			pathname: target.pathname,
-			routeName: target.matchedRoute.name,
-		});
-		queueDevRouteBuild(target);
+		scheduleDevRouteBuild(target);
 		void runQueuedDevBuilds();
 
 		return {
@@ -244,6 +464,7 @@ export default function applyReactPluginToHTML(
 		version,
 		serverReady({ builder }) {
 			liveBuilder = builder;
+			void refreshDependencyGraph();
 		},
 		build: {
 			buildConfig: () => ({
@@ -355,6 +576,7 @@ export default function applyReactPluginToHTML(
 					routeName: pendingRouteUpdate.matchedRoute.name,
 				});
 				pendingRouteUpdate = null;
+				void refreshDependencyGraph();
 			},
 		},
 		serverConfig: {
@@ -399,25 +621,39 @@ export default function applyReactPluginToHTML(
 				}
 			},
 		},
-		fileSystemWatchDir: enableHMR ? [route] : undefined,
+		fileSystemWatchDir: enableHMR ? [".", "node_modules"] : undefined,
 		onFileSystemChange(_ev, _fname, absolutePath) {
-			console.log(`[Apply-React] File change detected: ${absolutePath}`);
+			const changedAbsolutePath = normalizeWatchedFilePath(cwd, absolutePath);
 			const routePathname = getRoutePathnameFromFileChange(
 				cwd,
 				routeDir,
-				absolutePath,
+				changedAbsolutePath,
 			);
-			if (!routePathname) return;
-			const matchedRoute = fileRouter.match(routePathname);
 
-			if (!matchedRoute) return;
+			if (routePathname) {
+				const matchedRoute = fileRouter.match(routePathname);
+				if (matchedRoute) {
+					scheduleDevRouteBuild({
+						pathname: matchedRoute.pathname,
+						matchedRoute,
+					});
+					void runQueuedDevBuilds();
+					return;
+				}
+			}
 
-			sendHMRMessage({
-				type: "route-build-started",
-				pathname: matchedRoute.pathname,
-				routeName: matchedRoute.name,
-			});
-			queueDevRouteBuild({ pathname: matchedRoute.pathname, matchedRoute });
+			const dependentRouteNames =
+				dependentRouteNamesByFilePath.get(changedAbsolutePath);
+			if (!dependentRouteNames || dependentRouteNames.size === 0) {
+				void refreshDependencyGraph();
+				return;
+			}
+
+			for (const routeName of dependentRouteNames) {
+				const target = targetByRouteName.get(routeName);
+				if (!target) continue;
+				scheduleDevRouteBuild(target);
+			}
 			void runQueuedDevBuilds();
 		},
 		router: {
@@ -425,7 +661,8 @@ export default function applyReactPluginToHTML(
 				const acceptHeader = master.request.headers.get("accept") || "";
 				if (!acceptHeader.includes("text/html") || !currentDevRoute) return;
 				currentDevRoute = null;
-				queuedDevRoute = null;
+				queuedDevRoutes.length = 0;
+				queuedRouteNames.clear();
 				pendingRouteUpdate = null;
 				if (master.builder.isBuilding()) return;
 				await master.builder.build();

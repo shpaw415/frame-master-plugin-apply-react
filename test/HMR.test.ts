@@ -3,6 +3,13 @@ import { requestDevRouteBuild, setupHMR } from "../src/HMR";
 
 class FakeWebSocket {
 	static instance: FakeWebSocket | null = null;
+	static instancesCreated = 0;
+	static readonly CONNECTING = 0;
+	static readonly OPEN = 1;
+	static readonly CLOSING = 2;
+	static readonly CLOSED = 3;
+
+	readyState = FakeWebSocket.OPEN;
 
 	private listeners = new Map<
 		string,
@@ -11,6 +18,7 @@ class FakeWebSocket {
 
 	constructor(public readonly url: string) {
 		FakeWebSocket.instance = this;
+		FakeWebSocket.instancesCreated += 1;
 	}
 
 	addEventListener(
@@ -30,11 +38,15 @@ class FakeWebSocket {
 	}
 
 	async emit(message: HMRMessage) {
+		await this.emitRaw(JSON.stringify(message));
+	}
+
+	async emitRaw(payload: string) {
 		const listeners = this.listeners.get("message");
 		if (!listeners) return;
 
 		for (const listener of listeners) {
-			await listener({ data: JSON.stringify(message) } as MessageEvent<string>);
+			await listener({ data: payload } as MessageEvent<string>);
 		}
 	}
 }
@@ -44,8 +56,12 @@ const originalFetch = globalThis.fetch;
 
 describe("setupHMR", () => {
 	afterEach(() => {
+		if (FakeWebSocket.instance) {
+			FakeWebSocket.instance.readyState = FakeWebSocket.CLOSED;
+		}
 		globalThis.WebSocket = originalWebSocket;
 		FakeWebSocket.instance = null;
+		FakeWebSocket.instancesCreated = 0;
 	});
 
 	test("dispatches update and build lifecycle messages to callbacks", async () => {
@@ -94,6 +110,107 @@ describe("setupHMR", () => {
 			pathname: "/missing",
 		});
 
+		cleanup();
+	});
+
+	test("ignores malformed websocket payloads and keeps the listener alive", async () => {
+		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+		const onRoutesUpdate = mock(async () => {});
+		const cleanup = setupHMR({ onRoutesUpdate });
+		const socket = FakeWebSocket.instance;
+
+		await socket?.emitRaw("not-json");
+		await socket?.emit({
+			type: "update-routes",
+			pathname: "/dynamic/123",
+			routeName: "/dynamic/[id]",
+			route: "dynamic/[id].js",
+		});
+
+		expect(onRoutesUpdate).toHaveBeenCalledTimes(1);
+		cleanup();
+	});
+
+	test("isolates callback errors so later messages still process", async () => {
+		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+		const onRouteBuildStarted = mock(async () => {
+			throw new Error("failing callback");
+		});
+		const onRouteBuildMissing = mock(async () => {});
+		const cleanup = setupHMR({
+			onRouteBuildStarted,
+			onRouteBuildMissing,
+			onRoutesUpdate: async () => {},
+		});
+		const socket = FakeWebSocket.instance;
+
+		await socket?.emit({
+			type: "route-build-started",
+			pathname: "/dynamic/123",
+			routeName: "/dynamic/[id]",
+		});
+		await socket?.emit({
+			type: "route-build-missing",
+			pathname: "/missing",
+		});
+
+		expect(onRouteBuildStarted).toHaveBeenCalledTimes(1);
+		expect(onRouteBuildMissing).toHaveBeenCalledTimes(1);
+		cleanup();
+	});
+
+	test("reuses an open websocket across setup calls", async () => {
+		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+		const cleanupA = setupHMR({ onRoutesUpdate: async () => {} });
+		const cleanupB = setupHMR({ onRoutesUpdate: async () => {} });
+
+		expect(FakeWebSocket.instancesCreated).toBe(1);
+		cleanupA();
+		cleanupB();
+	});
+
+	test("re-initializes websocket when previous instance is closed", async () => {
+		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+		const cleanupA = setupHMR({ onRoutesUpdate: async () => {} });
+		const firstSocket = FakeWebSocket.instance;
+		expect(firstSocket).not.toBeNull();
+		if (!firstSocket) throw new Error("Expected first socket instance");
+
+		firstSocket.readyState = FakeWebSocket.CLOSED;
+		const cleanupB = setupHMR({ onRoutesUpdate: async () => {} });
+		const secondSocket = FakeWebSocket.instance;
+
+		expect(secondSocket).not.toBeNull();
+		expect(secondSocket).not.toBe(firstSocket);
+		expect(FakeWebSocket.instancesCreated).toBe(2);
+
+		cleanupA();
+		cleanupB();
+	});
+
+	test("ignores unknown message types", async () => {
+		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+		const onRoutesUpdate = mock(async () => {});
+		const onRouteBuildStarted = mock(async () => {});
+		const onRouteBuildMissing = mock(async () => {});
+		const cleanup = setupHMR({
+			onRoutesUpdate,
+			onRouteBuildStarted,
+			onRouteBuildMissing,
+		});
+
+		await FakeWebSocket.instance?.emitRaw(
+			JSON.stringify({ type: "unknown-event", pathname: "/" }),
+		);
+
+		expect(onRoutesUpdate).toHaveBeenCalledTimes(0);
+		expect(onRouteBuildStarted).toHaveBeenCalledTimes(0);
+		expect(onRouteBuildMissing).toHaveBeenCalledTimes(0);
 		cleanup();
 	});
 });
@@ -155,5 +272,20 @@ describe("requestDevRouteBuild", () => {
 			status: "missing",
 			pathname: "/missing",
 		});
+	});
+
+	test("throws when the dev server reports a non-404 failure", async () => {
+		const fetchMock = mock(
+			async () =>
+				new Response(JSON.stringify({ error: "boom" }), {
+					status: 500,
+					headers: { "content-type": "application/json" },
+				}),
+		);
+		globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+		expect(requestDevRouteBuild("/broken")).rejects.toThrow(
+			"Failed to request dev route build for /broken",
+		);
 	});
 });

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { getRoutePathnameFromFileChange } from "../src/index";
+import {
+	extractImportSpecifiers,
+	getRoutePathnameFromFileChange,
+} from "../src/index";
 
 describe("getRoutePathnameFromFileChange", () => {
 	test("accepts file change paths relative to the project root", () => {
@@ -30,5 +33,36 @@ describe("getRoutePathnameFromFileChange", () => {
 				"test/src/client-shell.tsx",
 			),
 		).toBeNull();
+	});
+});
+
+describe("extractImportSpecifiers", () => {
+	test("extracts static, dynamic, and require import specifiers", () => {
+		const source = `
+			import thing from "./thing";
+			import "./side-effect.css";
+			export { foo } from "../shared/foo";
+			const lazy = import("react");
+			const mod = require("./legacy");
+		`;
+
+		expect(extractImportSpecifiers(source)).toEqual([
+			"./thing",
+			"../shared/foo",
+			"./side-effect.css",
+			"react",
+			"./legacy",
+		]);
+	});
+
+	test("supports type-only imports and de-duplicates repeated specifiers", () => {
+		const source = `
+			import type { Foo } from "./types";
+			import { value } from "./same";
+			import { other } from "./same";
+			export type { Bar } from "./types";
+		`;
+
+		expect(extractImportSpecifiers(source)).toEqual(["./types", "./same"]);
 	});
 });
