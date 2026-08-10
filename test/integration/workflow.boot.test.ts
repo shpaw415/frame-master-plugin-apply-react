@@ -1,5 +1,5 @@
 /**
- * Integration: Frame-Master 3.2.1 createPluginTestEnv — plugin boot + HMR HTTP.
+ * Integration: Frame-Master 3.2.2+ createPluginTestEnv — plugin boot + HMR HTTP.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
