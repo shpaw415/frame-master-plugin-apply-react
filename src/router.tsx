@@ -629,8 +629,10 @@ export function RouterHost({
 				hmrApplyingRef.current = true;
 				setHmrStatus("building");
 				try {
-					// Encode [param] segments the same way as toModUrl / server
-					const encodedPath = base
+					// Public mod URLs use .js (not source .tsx); encode [param] segments
+					const asJs = base.replace(/\.(tsx|ts|jsx|js|mjs|cjs|mts|cts)$/i, ".js");
+					const withJs = asJs.endsWith(".js") ? asJs : `${asJs}.js`;
+					const encodedPath = withJs
 						.split("/")
 						.filter(Boolean)
 						.map((seg) => encodeURIComponent(seg))

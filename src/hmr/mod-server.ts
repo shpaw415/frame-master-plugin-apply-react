@@ -113,10 +113,18 @@ function resolveSpecifier(
 	return null;
 }
 
+const SOURCE_EXT_RE = /\.(tsx|ts|jsx|js|mjs|cjs|mts|cts)$/i;
+
+/** Public module URLs always use `.js` (transpiled), never source `.tsx`. */
+export function toPublicModRelPath(rel: string): string {
+	const normalized = rel.replace(/\\/g, "/");
+	const asJs = normalized.replace(SOURCE_EXT_RE, ".js");
+	return asJs.endsWith(".js") ? asJs : `${asJs}.js`;
+}
+
 /** Encode moduleRoot-relative path for use in `/@apply-react/mod/...` URLs. */
 export function encodeModRelPath(rel: string): string {
-	return rel
-		.replace(/\\/g, "/")
+	return toPublicModRelPath(rel)
 		.split("/")
 		.filter(Boolean)
 		.map((seg) => encodeURIComponent(seg))
@@ -125,13 +133,14 @@ export function encodeModRelPath(rel: string): string {
 
 /**
  * Stable browser URL for a module under moduleRoot.
- * Path segments are encodeURIComponent'd so dynamic routes like `[id].tsx` work.
+ * Always `.js` extension; path segments are encoded (`[id].js`).
  */
 export function toModUrl(moduleRootAbs: string, absoluteFile: string): string {
 	const rel = relative(moduleRootAbs, absoluteFile).replace(/\\/g, "/");
 	return `/@apply-react/mod/${encodeModRelPath(rel)}`;
 }
 
+/** Decode `/@apply-react/mod/...` pathname to a moduleRoot-relative path (may end in `.js`). */
 export function fromModUrlPath(
 	moduleRootAbs: string,
 	urlPathname: string,
@@ -156,21 +165,35 @@ export function fromModUrlPath(
 	return abs;
 }
 
+/**
+ * Map a public mod URL (…/index.js) back to the on-disk source file (…/index.tsx).
+ */
 export function resolveModFile(
 	moduleRootAbs: string,
 	urlPathname: string,
 ): string | null {
 	const abs = fromModUrlPath(moduleRootAbs, urlPathname);
 	if (!abs) return null;
+
+	// Prefer exact source file if URL still has a source extension
 	if (existsSync(abs) && isAppSourceFile(abs)) return abs;
-	for (const e of RESOLVE_EXTENSIONS) {
-		if (existsSync(abs + e) && isAppSourceFile(abs + e)) return abs + e;
+
+	// Public URLs use .js — strip and probe real source extensions
+	const withoutJs = abs.replace(/\.js$/i, "");
+	const candidates = [
+		withoutJs,
+		...RESOLVE_EXTENSIONS.map((e) => withoutJs + e),
+		...RESOLVE_EXTENSIONS.map((e) => join(withoutJs, `index${e}`)),
+		// also try with .js left on (plain JS source)
+		abs,
+		...RESOLVE_EXTENSIONS.map((e) => abs + e),
+	];
+	for (const c of candidates) {
+		if (existsSync(c) && (isAppSourceFile(c) || extname(c) === ".json")) {
+			return c;
+		}
 	}
-	for (const e of RESOLVE_EXTENSIONS) {
-		const idx = join(abs, `index${e}`);
-		if (existsSync(idx)) return idx;
-	}
-	return existsSync(abs) ? abs : null;
+	return null;
 }
 
 function loaderFor(file: string): "ts" | "tsx" | "js" | "jsx" {

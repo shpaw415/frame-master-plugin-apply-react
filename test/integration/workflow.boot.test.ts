@@ -105,11 +105,11 @@ describe("integration: apply-react boot + HMR HTTP", () => {
 				});
 				const base = env.baseUrl!;
 				const res = await nativeFetch(
-					`${base}/@apply-react/mod/pages/index.tsx`,
+					`${base}/@apply-react/mod/pages/index.js`,
 				);
 				expect(res.status).toBe(200);
 				const code = await res.text();
-				expect(code).toContain("/@apply-react/mod/ctx");
+				expect(code).toContain("/@apply-react/mod/ctx.js");
 			} finally {
 				process.chdir(prev);
 			}

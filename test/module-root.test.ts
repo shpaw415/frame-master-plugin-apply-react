@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { resolveModuleRoot } from "../src/hmr/module-root";
 import {
 	fromModUrlPath,
+	resolveModFile,
 	toModUrl,
 	transpileModFile,
 } from "../src/hmr/mod-server";
@@ -34,27 +35,27 @@ describe("resolveModuleRoot", () => {
 });
 
 describe("mod urls", () => {
-	test("round-trip path", () => {
+	test("public URL uses .js not source .tsx", () => {
 		const root = "/proj/app";
 		const file = "/proj/app/pages/index.tsx";
 		const url = toModUrl(root, file);
-		expect(url).toBe("/@apply-react/mod/pages/index.tsx");
-		expect(fromModUrlPath(root, url)).toBe(file);
+		expect(url).toBe("/@apply-react/mod/pages/index.js");
+		// fromModUrlPath returns the .js path; resolveModFile maps to source
+		expect(fromModUrlPath(root, url)).toBe("/proj/app/pages/index.js");
 	});
 
-	test("encodes dynamic route brackets", () => {
+	test("encodes dynamic route brackets as .js", () => {
 		const root = "/proj/src";
 		const file = "/proj/src/pages/products/[productid].tsx";
 		const url = toModUrl(root, file);
 		expect(url).toBe(
-			"/@apply-react/mod/pages/products/%5Bproductid%5D.tsx",
+			"/@apply-react/mod/pages/products/%5Bproductid%5D.js",
 		);
-		expect(fromModUrlPath(root, url)).toBe(file);
 	});
 });
 
 describe("transpileModFile", () => {
-	test("externalizes relative imports to stable mod urls", async () => {
+	test("externalizes relative imports to stable .js mod urls", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "ar-tp-"));
 		try {
 			mkdirSync(join(dir, "pages"), { recursive: true });
@@ -69,9 +70,14 @@ describe("transpileModFile", () => {
 			const out = await transpileModFile(join(dir, "pages/index.tsx"), dir);
 			expect("code" in out).toBe(true);
 			if ("code" in out) {
-				expect(out.code).toContain("/@apply-react/mod/ctx");
+				expect(out.code).toContain("/@apply-react/mod/ctx.js");
 				expect(out.code).not.toContain('from "../ctx"');
+				expect(out.code).not.toContain("ctx.ts");
 			}
+			// .js URL resolves back to source .tsx
+			expect(
+				resolveModFile(dir, "/@apply-react/mod/pages/index.js"),
+			).toBe(join(dir, "pages/index.tsx"));
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
