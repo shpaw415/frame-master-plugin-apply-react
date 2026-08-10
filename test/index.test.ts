@@ -31,4 +31,14 @@ describe("getRoutePathnameFromFileChange", () => {
 			),
 		).toBeNull();
 	});
+
+	test("ignores layout special files (not page pathnames)", () => {
+		expect(
+			getRoutePathnameFromFileChange(
+				"/workspace/apply-react",
+				"/workspace/apply-react/test/src/pages",
+				"test/src/pages/layout.tsx",
+			),
+		).toBeNull();
+	});
 });

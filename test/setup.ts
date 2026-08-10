@@ -1,4 +1,21 @@
+// happy-dom is for unit/router tests. Integration tests run in a separate
+// process without this preload (see package.json test:integration).
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
+const nativeFetch = globalThis.fetch.bind(globalThis);
+const nativeWebSocket = globalThis.WebSocket;
+
+(
+	globalThis as typeof globalThis & {
+		__APPLY_REACT_NATIVE_FETCH__?: typeof fetch;
+		__APPLY_REACT_NATIVE_WEBSOCKET__?: typeof WebSocket;
+	}
+).__APPLY_REACT_NATIVE_FETCH__ = nativeFetch;
+(
+	globalThis as typeof globalThis & {
+		__APPLY_REACT_NATIVE_WEBSOCKET__?: typeof WebSocket;
+	}
+).__APPLY_REACT_NATIVE_WEBSOCKET__ = nativeWebSocket;
 
 GlobalRegistrator.register({
 	url: "http://localhost/",

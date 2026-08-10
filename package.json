@@ -6,13 +6,14 @@
 		"@types/bun": "^1.3.14",
 		"@types/react": "^19.2.14",
 		"@types/react-dom": "^19.2.3",
+		"frame-master": "^3.2.1",
 		"frame-master-plugin-serve-from-build": "^1.1.1"
 	},
 	"peerDependencies": {
 		"typescript": "^5.9.3",
 		"react": "^19.2.5",
 		"react-dom": "^19.2.5",
-		"frame-master": "^3.1.3"
+		"frame-master": "^3.2.1"
 	},
 	"exports": {
 		"./plugin": "./src/index.ts",
@@ -25,7 +26,10 @@
 		"start": "NODE_ENV=production bun frame-master start",
 		"build:dev": "NODE_ENV=development bun frame-master build",
 		"build": "NODE_ENV=production bun frame-master build",
-		"test": "bun test --tsconfig-override test/tsconfig.json test/"
+		"test": "bun run test:unit && bun run test:integration",
+		"test:unit": "bun test --preload ./test/setup.ts --tsconfig-override test/tsconfig.json test/*.test.ts test/*.test.tsx",
+		"test:integration": "bun test --preload ./test/setup.integration.ts --tsconfig-override test/tsconfig.json test/integration/",
+		"postinstall": "bun scripts/patch-frame-master.mjs"
 	},
 	"dependencies": {
 		"bun-file-system-router-browser": "^1.3.13"

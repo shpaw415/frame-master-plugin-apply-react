@@ -23,40 +23,19 @@ declare module "@apply-react/loading.tsx" {
 }
 
 declare module "@apply-react/props.ts" {
-	const ApplyReactPluginOptions: import("./index.ts").ApplyReactPluginOptions;
+	const ApplyReactPluginOptions: import("./options.ts").ApplyReactPluginOptions;
 	export default ApplyReactPluginOptions;
 }
 
-declare type RouteUpdateMessage = {
-	type: "update-routes";
-	route: string;
-	pathname: string;
-	routeName: string;
-};
-
-declare type RouteBuildStartedMessage = {
-	type: "route-build-started";
-	pathname: string;
-	routeName: string;
-};
-
-declare type RouteBuildMissingMessage = {
-	type: "route-build-missing";
-	pathname: string;
-};
-
-declare type HMRMessage =
-	| RouteUpdateMessage
-	| RouteBuildStartedMessage
-	| RouteBuildMissingMessage;
-
+declare type RouteUpdateMessage =
+	import("./hmr/protocol.ts").RouteUpdateMessage;
+declare type RouteBuildStartedMessage =
+	import("./hmr/protocol.ts").RouteBuildStartedMessage;
+declare type RouteBuildMissingMessage =
+	import("./hmr/protocol.ts").RouteBuildMissingMessage;
+declare type RouteBuildFailedMessage =
+	import("./hmr/protocol.ts").RouteBuildFailedMessage;
+declare type FullReloadMessage = import("./hmr/protocol.ts").FullReloadMessage;
+declare type HMRMessage = import("./hmr/protocol.ts").HMRMessage;
 declare type DevRouteBuildResponse =
-	| {
-			status: "building";
-			pathname: string;
-			routeName: string;
-	  }
-	| {
-			status: "missing";
-			pathname: string;
-	  };
+	import("./hmr/protocol.ts").DevRouteBuildResponse;

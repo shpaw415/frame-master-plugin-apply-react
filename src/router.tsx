@@ -8,13 +8,19 @@ import {
 } from "bun-file-system-router-browser";
 import {
 	Component,
+	type CSSProperties,
 	type JSX,
 	useCallback,
 	useEffect,
 	useRef,
 	useState,
 } from "react";
-import { requestDevRouteBuild, setupHMR } from "./HMR";
+import {
+	type HmrConnectionStatus,
+	reportActivePathname,
+	requestDevRouteBuild,
+	setupHMR,
+} from "./HMR";
 import {
 	getRelatedLayoutEntriesFromPathname,
 	LayoutCache,
@@ -82,6 +88,8 @@ type BuildNoticeState = {
 export type DevBuildNotifierProps = {
 	pathname: string | null;
 	visible: boolean;
+	status?: HmrConnectionStatus | "building" | "failed" | "live";
+	errorMessage?: string | null;
 };
 
 type InitialRouteSnapshot = {
@@ -156,6 +164,8 @@ export type RouterHostProps = {
 	onRouteChange?: (route: MatchedRoute) => void | Promise<void>;
 	/** Custom component rendered while a dev-only route build is pending. */
 	buildNotifier?: (props: DevBuildNotifierProps) => JSX.Element | null;
+	/** Show HMR error overlay (default true in dev). */
+	hmrOverlay?: boolean;
 };
 
 /**
@@ -176,6 +186,7 @@ export function RouterHost({
 	errorResolvers = defaultErrorResolvers,
 	onRouteChange,
 	buildNotifier: BuildNotifier = DefaultBuildNotifier,
+	hmrOverlay = true,
 }: RouterHostProps) {
 	const initialSnapshot =
 		typeof window === "undefined"
@@ -186,11 +197,17 @@ export function RouterHost({
 	const navigationRef = useRef(0);
 	const pendingDevRouteRef = useRef<PendingDevRoute | null>(null);
 	const buildNoticeTimeoutRef = useRef<number | null>(null);
+	const lastGenerationRef = useRef(0);
+	const softFailCountRef = useRef(0);
 	const [pageKey, setPageKey] = useState(0);
 	const [activeLayouts, setActiveLayouts] = useState<LayoutEntry[]>(
 		() => initialSnapshot?.layouts ?? [],
 	);
 	const [buildNotice, setBuildNotice] = useState<BuildNoticeState>(null);
+	const [hmrStatus, setHmrStatus] = useState<
+		HmrConnectionStatus | "building" | "failed" | "live"
+	>("live");
+	const [hmrError, setHmrError] = useState<string | null>(null);
 	const showBuildNotice = useCallback((pathname: string) => {
 		if (buildNoticeTimeoutRef.current) {
 			window.clearTimeout(buildNoticeTimeoutRef.current);
@@ -307,17 +324,23 @@ export function RouterHost({
 				return;
 			}
 
+			// Merge static route table with HMR-updated importers so layouts/404s
+			// never disappear when selective client state is partial.
+			const routeTable = { ..._ROUTES_, ...routes };
 			const [layouts, LoadingComponent] = await Promise.all([
-				getRelatedLayoutEntriesFromPathname(pathname, routes),
+				getRelatedLayoutEntriesFromPathname(pathname, routeTable),
 				getLoadingComponent(pathname),
 			]);
 			if (navigationRef.current !== navigationId) return;
+
 			setActiveLayouts(layouts);
-			_setCurrentPage(() => LoadingComponent);
+			// Reset error boundary on every navigation. Prefer keeping the previous
+			// page visible when the loading fallback renders null (common default).
 			setPageKey(navigationId);
-			await onRouteChange?.(matched as MatchedRoute);
+			_setCurrentPage(() => LoadingComponent);
+
 			if (navigationRef.current !== navigationId) return;
-			const resolvedRoute = await resolveRoute(pathname, routes);
+			const resolvedRoute = await resolveRoute(pathname, routeTable);
 			if (navigationRef.current !== navigationId) return;
 
 			switch (resolvedRoute.status) {
@@ -325,11 +348,15 @@ export function RouterHost({
 					pendingDevRouteRef.current = null;
 					hideBuildNotice();
 					_setCurrentPage(() => resolvedRoute.Page);
+					if (HMR_ENABLED) reportActivePathname(pathname);
+					await onRouteChange?.(matched as MatchedRoute);
 					return;
 				case "not-found":
 					pendingDevRouteRef.current = null;
 					hideBuildNotice();
 					_setCurrentPage(() => resolvedRoute.Page);
+					if (HMR_ENABLED) reportActivePathname(pathname);
+					await onRouteChange?.(matched as MatchedRoute);
 					return;
 				case "awaiting-dev-build":
 					await requestPendingRouteBuild(resolvedRoute.matched, navigationId);
@@ -359,42 +386,126 @@ export function RouterHost({
 		});
 	}, []);
 
-	// HMR setup - listens for route changes from the HMR system and updates the route components in state without a full reload
+	// HMR setup — soft update → remount → full reload ladder
 	useEffect(
 		() =>
 			HMR_ENABLED
 				? setupHMR({
-						onRouteBuildStarted: ({ pathname, routeName }) => {
+						onStatusChange: (status) => {
+							setHmrStatus((prev) =>
+								prev === "building" || prev === "failed" ? prev : status,
+							);
+						},
+						getPathname: () => window.location.pathname,
+						onRouteBuildStarted: ({ pathname, routeName, generation }) => {
+							if (generation < lastGenerationRef.current) return;
 							const pendingRoute = pendingDevRouteRef.current;
-							if (!pendingRoute || pendingRoute.routeName !== routeName) return;
+							if (pendingRoute && pendingRoute.routeName !== routeName) return;
+							setHmrStatus("building");
+							setHmrError(null);
 							showBuildNotice(pathname);
 						},
-						onRoutesUpdate: (newRoutes) => {
-							LayoutCache.clear();
-							setRoutes((curr) => {
-								const nextRoutes = {
-									...curr,
+						onRoutesUpdate: async (newRoutes) => {
+							if (newRoutes.generation < lastGenerationRef.current) return;
+							lastGenerationRef.current = newRoutes.generation;
+							setHmrError(null);
+
+							try {
+								const HotPage = await newRoutes.component();
+								if (!HotPage)
+									throw new Error("Hot module exported empty default");
+
+								LayoutCache.clear();
+								const nextRoutesRef = {
+									current: null as null | typeof _ROUTES_,
+								};
+								setRoutes((curr) => {
+									const next = {
+										...curr,
+										[newRoutes.routeName]: newRoutes.component,
+									};
+									nextRoutesRef.current = next;
+									return next;
+								});
+								const nextRoutes = nextRoutesRef.current ?? {
 									[newRoutes.routeName]: newRoutes.component,
 								};
+
 								const pendingRoute = pendingDevRouteRef.current;
 								if (pendingRoute?.routeName === newRoutes.routeName) {
 									pendingDevRouteRef.current = null;
-									setCurrentPage(pendingRoute.pathname, nextRoutes);
+									await setCurrentPage(pendingRoute.pathname, nextRoutes);
+								} else if (
+									router.match(window.location.pathname)?.name ===
+									newRoutes.routeName
+								) {
+									_setCurrentPage(() => () => <HotPage />);
+									setPageKey((k) => k + 1);
 								} else {
-									setCurrentPage(window.location.pathname, nextRoutes);
+									await setCurrentPage(window.location.pathname, nextRoutes);
 								}
-
-								return nextRoutes;
-							});
+								softFailCountRef.current = 0;
+								hideBuildNotice();
+								setHmrStatus("live");
+							} catch (error) {
+								console.error(
+									"[Apply-React HMR] Soft update failed, attempting remount",
+									error,
+								);
+								softFailCountRef.current += 1;
+								try {
+									LayoutCache.clear();
+									setPageKey((k) => k + 1);
+									const nextRoutesRef = {
+										current: null as null | typeof _ROUTES_,
+									};
+									setRoutes((curr) => {
+										const next = {
+											...curr,
+											[newRoutes.routeName]: newRoutes.component,
+										};
+										nextRoutesRef.current = next;
+										return next;
+									});
+									await setCurrentPage(
+										window.location.pathname,
+										nextRoutesRef.current ?? {
+											[newRoutes.routeName]: newRoutes.component,
+										},
+									);
+									softFailCountRef.current = 0;
+									hideBuildNotice();
+									setHmrStatus("live");
+								} catch (remountError) {
+									console.error(
+										"[Apply-React HMR] Remount failed, full reload",
+										remountError,
+									);
+									window.location.reload();
+								}
+							}
 						},
-						onRouteBuildMissing: ({ pathname }) => {
+						onRouteBuildMissing: ({ pathname, generation }) => {
+							if (generation < lastGenerationRef.current) return;
 							const pendingRoute = pendingDevRouteRef.current;
 							if (!pendingRoute || pendingRoute.pathname !== pathname) return;
+							hideBuildNotice();
+							setHmrStatus("live");
 							void setNotFoundPage(pathname, pendingRoute.navigationId);
+						},
+						onBuildFailed: ({ error, generation }) => {
+							if (generation < lastGenerationRef.current) return;
+							setHmrStatus("failed");
+							setHmrError(error.message);
+							hideBuildNotice();
+						},
+						onFullReload: ({ reason }) => {
+							console.info("[Apply-React HMR] Full reload:", reason);
+							window.location.reload();
 						},
 					})
 				: undefined,
-		[setCurrentPage, setNotFoundPage, showBuildNotice],
+		[hideBuildNotice, setCurrentPage, setNotFoundPage, showBuildNotice],
 	);
 
 	useEffect(
@@ -412,13 +523,27 @@ export function RouterHost({
 		};
 
 		const clickHandler = async (e: MouseEvent) => {
-			if (e.ctrlKey) return;
+			// Leave modified clicks / non-primary button / download to the browser
+			// (happy-dom synthetic clicks may omit button — treat missing as primary)
+			if (
+				e.defaultPrevented ||
+				(typeof e.button === "number" && e.button !== 0) ||
+				e.metaKey ||
+				e.ctrlKey ||
+				e.shiftKey ||
+				e.altKey
+			) {
+				return;
+			}
 
 			const target = e.target as HTMLElement;
 			const anchor = target.closest("a");
 
 			// Only handle clicks on anchor tags without target="_blank" or empty href
 			if (!anchor?.href || anchor.target === "_blank") return;
+			if (anchor.hasAttribute("download")) return;
+			if (anchor.getAttribute("rel")?.split(/\s+/).includes("external"))
+				return;
 
 			const url = new URL(anchor.href);
 			const currentLocation = getLocationHref(window.location);
@@ -435,7 +560,6 @@ export function RouterHost({
 				}
 
 				e.preventDefault();
-				console.log("not found no match for url:", url.pathname);
 				if (nextLocation !== currentLocation) {
 					window.history.pushState(null, "", nextLocation);
 				}
@@ -504,8 +628,22 @@ export function RouterHost({
 			</WrapWithLayouts>
 			<BuildNotifier
 				pathname={buildNotice?.pathname ?? null}
-				visible={buildNotice?.visible ?? false}
+				visible={
+					(buildNotice?.visible ?? false) ||
+					hmrStatus === "reconnecting" ||
+					hmrStatus === "connecting" ||
+					hmrStatus === "failed"
+				}
+				status={hmrStatus}
+				errorMessage={hmrError}
 			/>
+			{hmrOverlay && hmrError ? (
+				<HmrErrorOverlay
+					message={hmrError}
+					onDismiss={() => setHmrError(null)}
+					onReload={() => window.location.reload()}
+				/>
+			) : null}
 		</>
 	);
 }
@@ -543,8 +681,33 @@ function isMissingRouteModuleError(error: unknown) {
 	);
 }
 
-function DefaultBuildNotifier({ pathname, visible }: DevBuildNotifierProps) {
-	if (!pathname) return null;
+function DefaultBuildNotifier({
+	pathname,
+	visible,
+	status = "building",
+	errorMessage,
+}: DevBuildNotifierProps) {
+	if (!visible && status === "live") return null;
+
+	const label =
+		status === "failed"
+			? errorMessage
+				? `Build failed: ${errorMessage}`
+				: "Build failed"
+			: status === "reconnecting"
+				? "HMR reconnecting…"
+				: status === "connecting"
+					? "HMR connecting…"
+					: status === "building"
+						? `Building ${pathname ?? "…"}`
+						: pathname
+							? `Building ${pathname}`
+							: "HMR";
+
+	const showSpinner =
+		status === "building" ||
+		status === "connecting" ||
+		status === "reconnecting";
 
 	return (
 		<>
@@ -567,7 +730,10 @@ function DefaultBuildNotifier({ pathname, visible }: DevBuildNotifierProps) {
 					padding: "0.5rem 0.85rem 0.5rem 0.6rem",
 					borderRadius: "999px",
 					border: "1px solid rgba(255,255,255,0.08)",
-					background: "rgba(15, 17, 21, 0.82)",
+					background:
+						status === "failed"
+							? "rgba(127, 29, 29, 0.9)"
+							: "rgba(15, 17, 21, 0.82)",
 					boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
 					color: "rgba(226, 232, 240, 0.88)",
 					fontSize: "0.8rem",
@@ -582,43 +748,137 @@ function DefaultBuildNotifier({ pathname, visible }: DevBuildNotifierProps) {
 						"transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease",
 					pointerEvents: "none",
 					userSelect: "none",
+					maxWidth: "min(420px, calc(100vw - 2rem))",
 				}}
 			>
-				<svg
-					aria-hidden="true"
-					width="13"
-					height="13"
-					viewBox="0 0 13 13"
-					fill="none"
-					style={{ animation: "_ar_spin 0.9s linear infinite", flexShrink: 0 }}
-				>
-					<circle
-						cx="6.5"
-						cy="6.5"
-						r="5.5"
-						stroke="rgba(226,232,240,0.22)"
-						strokeWidth="1.5"
-					/>
-					<path
-						d="M6.5 1A5.5 5.5 0 0 1 12 6.5"
-						stroke="rgba(148,163,184,0.9)"
-						strokeWidth="1.5"
-						strokeLinecap="round"
-					/>
-				</svg>
-				<span>
-					Building{" "}
-					<span
+				{showSpinner ? (
+					<svg
+						aria-hidden="true"
+						width="13"
+						height="13"
+						viewBox="0 0 13 13"
+						fill="none"
 						style={{
-							color: "rgba(255,255,255,0.65)",
-							fontFamily: "ui-monospace, monospace",
-							fontSize: "0.77rem",
+							animation: "_ar_spin 0.9s linear infinite",
+							flexShrink: 0,
 						}}
 					>
-						{pathname}
-					</span>
+						<circle
+							cx="6.5"
+							cy="6.5"
+							r="5.5"
+							stroke="rgba(226,232,240,0.22)"
+							strokeWidth="1.5"
+						/>
+						<path
+							d="M6.5 1A5.5 5.5 0 0 1 12 6.5"
+							stroke="rgba(148,163,184,0.9)"
+							strokeWidth="1.5"
+							strokeLinecap="round"
+						/>
+					</svg>
+				) : null}
+				<span
+					style={{
+						overflow: "hidden",
+						textOverflow: "ellipsis",
+						whiteSpace: "nowrap",
+					}}
+				>
+					{label}
 				</span>
 			</div>
 		</>
 	);
 }
+
+function HmrErrorOverlay({
+	message,
+	onDismiss,
+	onReload,
+}: {
+	message: string;
+	onDismiss: () => void;
+	onReload: () => void;
+}) {
+	return (
+		<div
+			role="alert"
+			style={{
+				position: "fixed",
+				inset: 0,
+				zIndex: 10000,
+				display: "flex",
+				alignItems: "flex-start",
+				justifyContent: "center",
+				padding: "2rem",
+				background: "rgba(0,0,0,0.45)",
+				fontFamily: "system-ui, sans-serif",
+			}}
+		>
+			<div
+				style={{
+					width: "min(560px, 100%)",
+					marginTop: "10vh",
+					background: "#1c1917",
+					color: "#fafaf9",
+					borderRadius: 12,
+					border: "1px solid rgba(248,113,113,0.35)",
+					boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
+					padding: "1.25rem 1.35rem",
+				}}
+			>
+				<div style={{ fontWeight: 600, marginBottom: 8, color: "#fca5a5" }}>
+					Apply-React build failed
+				</div>
+				<pre
+					style={{
+						margin: 0,
+						whiteSpace: "pre-wrap",
+						wordBreak: "break-word",
+						fontSize: 13,
+						lineHeight: 1.45,
+						color: "#e7e5e4",
+						maxHeight: 240,
+						overflow: "auto",
+					}}
+				>
+					{message}
+				</pre>
+				<div
+					style={{
+						display: "flex",
+						gap: 8,
+						marginTop: 16,
+						justifyContent: "flex-end",
+					}}
+				>
+					<button
+						type="button"
+						onClick={onDismiss}
+						style={overlayBtnStyle}
+					>
+						Dismiss
+					</button>
+					<button
+						type="button"
+						onClick={onReload}
+						style={{ ...overlayBtnStyle, background: "#b91c1c", border: "none" }}
+					>
+						Reload
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+const overlayBtnStyle: CSSProperties = {
+	cursor: "pointer",
+	borderRadius: 8,
+	padding: "0.4rem 0.75rem",
+	border: "1px solid rgba(255,255,255,0.15)",
+	background: "transparent",
+	color: "#fafaf9",
+	fontSize: 13,
+};

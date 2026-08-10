@@ -111,8 +111,12 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 | `style`           | `"nextjs"`  | -           | Routing convention style (currently supports Next.js style) |
 | `route`           | `string`    | -           | Base path to your routes directory                          |
 | `clientShellPath` | `string?`   | -           | Optional path to a custom client-side shell component       |
-| `enableHMR`       | `boolean`   | `true`      | Enable Hot Module Replacement for development               |
-| `hydration`       | `"hydrate"` | `"hydrate"` | Hydration method to use on the client                       |
+| `enableHMR`               | `boolean`   | `true` in dev | Enable Hot Module Replacement for development                          |
+| `hydration`               | `"hydrate" \| "render"` | `"hydrate"` | `hydrate` attaches to SSG HTML; `render` uses `createRoot` |
+| `watchDirectories`        | `string[]?` | `['.']`     | Directories watched for HMR file changes (project-root relative)       |
+| `watchDirectoriesExclude` | `string[]?` | -           | Directories excluded from HMR watching                                 |
+| `hmr`                     | `object?`   | -           | Advanced HMR: `debounceMs`, `heartbeatMs`, `reconnect`, `overlay`      |
+| `debug`                   | `boolean?`  | `false`     | Verbose Apply-React logs (`DEBUG_APPLY_REACT=1`)                        |
 
 ## How It Works
 
@@ -127,10 +131,12 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 
 During development, the HMR system:
 
-- Watches for file changes in your pages directory
-- Automatically updates the client without full page reload
-- Maintains component state where possible
-- Provides instant feedback via WebSocket connection
+- Watches project files (configurable via `watchDirectories`) with debounced rebuilds
+- Uses `ws` / `wss` automatically, reconnects with backoff, and heartbeats the socket
+- Selectively rebuilds routes needed by connected clients
+- Applies updates with a failsafe ladder: soft swap → route remount → full reload
+- Surfaces build failures in a dev overlay and status chip
+- Classifies `layout` / `loading` / `404` edits correctly (no bogus page routes)
 
 ## Client-Side Router
 

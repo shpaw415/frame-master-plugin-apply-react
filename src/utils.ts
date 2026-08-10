@@ -39,9 +39,10 @@ export async function preLoadPath(pathname: string) {
 
 	if (!matched) throw new Error(`No route matched for pathname: ${pathname}`);
 
+	// Route map keys use matched.name (FS router id), not matched.pathname
 	return Promise.all([
-		_ROUTES_[matched.pathname]?.(),
-		getRelatedLayoutFromPathname(matched.pathname, _ROUTES_),
+		_ROUTES_[matched.name]?.(),
+		getRelatedLayoutFromPathname(matched.name, _ROUTES_),
 	]);
 }
 

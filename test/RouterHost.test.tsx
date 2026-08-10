@@ -11,8 +11,8 @@ import HomePage from "./src/pages/index";
 
 const describeRouterHost = describe;
 
-function flushNavigation() {
-	return new Promise((resolve) => setTimeout(resolve, 0));
+function flushNavigation(ms = 0) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getInput() {
@@ -109,10 +109,11 @@ describeRouterHost("RouterHost shared layouts", () => {
 				new MouseEvent("click", {
 					bubbles: true,
 					cancelable: true,
+					button: 0,
 				}),
 			);
-			await flushNavigation();
-			await flushNavigation();
+			await flushNavigation(50);
+			await flushNavigation(50);
 		});
 
 		expect(document.body.textContent).toContain("Sub Page");
@@ -138,10 +139,11 @@ describeRouterHost("RouterHost shared layouts", () => {
 				new MouseEvent("click", {
 					bubbles: true,
 					cancelable: true,
+					button: 0,
 				}),
 			);
-			await flushNavigation();
-			await flushNavigation();
+			await flushNavigation(50);
+			await flushNavigation(50);
 		});
 
 		expect(document.body.textContent).toContain("Default Not Found");
@@ -156,10 +158,11 @@ describeRouterHost("RouterHost shared layouts", () => {
 				new MouseEvent("click", {
 					bubbles: true,
 					cancelable: true,
+					button: 0,
 				}),
 			);
-			await flushNavigation();
-			await flushNavigation();
+			await flushNavigation(50);
+			await flushNavigation(50);
 		});
 
 		expect(document.body.textContent).toContain("Main Page");
