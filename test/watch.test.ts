@@ -3,7 +3,9 @@ import {
 	classifyWatchPath,
 	filePathToPathname,
 	getRoutePathnameFromFileChange,
+	isSpecialRouteName,
 	resolveWatchDirectories,
+	shouldIgnoreWatchPath,
 } from "../src/hmr/watch";
 
 const root = "/workspace/app";
@@ -74,5 +76,30 @@ describe("resolveWatchDirectories", () => {
 			["node_modules"],
 		);
 		expect(dirs.every((d) => !d.endsWith("node_modules"))).toBe(true);
+	});
+});
+
+describe("shouldIgnoreWatchPath", () => {
+	test("ignores build output and node_modules", () => {
+		expect(
+			shouldIgnoreWatchPath(root, `${root}/.frame-master/build/x.js`),
+		).toBe(true);
+		expect(shouldIgnoreWatchPath(root, `${root}/node_modules/x.js`)).toBe(
+			true,
+		);
+		expect(shouldIgnoreWatchPath(root, `${root}/src/lib/util.ts`)).toBe(
+			false,
+		);
+	});
+});
+
+describe("isSpecialRouteName", () => {
+	test("detects layout/loading/404", () => {
+		expect(isSpecialRouteName("/layout")).toBe(true);
+		expect(isSpecialRouteName("/sub/layout")).toBe(true);
+		expect(isSpecialRouteName("/sub/loading")).toBe(true);
+		expect(isSpecialRouteName("/sub/404")).toBe(true);
+		expect(isSpecialRouteName("/sub")).toBe(false);
+		expect(isSpecialRouteName("/")).toBe(false);
 	});
 });

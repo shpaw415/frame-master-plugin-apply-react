@@ -1,4 +1,11 @@
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+	basename,
+	extname,
+	isAbsolute,
+	join,
+	relative,
+	resolve,
+} from "node:path";
 
 export type WatchClassifyKind =
 	| "page"
@@ -16,6 +23,52 @@ export type WatchClassifyResult = {
 	/** Pathname-like key for page routes (e.g. /sub/[id]) */
 	pagePathname: string | null;
 };
+
+/** Paths that must never trigger HMR (build output / VCS / deps). */
+const IGNORED_PATH_PREFIXES = [
+	".frame-master/",
+	"node_modules/",
+	".git/",
+	"dist/",
+	"build/",
+	"coverage/",
+	".next/",
+	"out/",
+];
+
+/**
+ * True for FS-router special segment names (not real navigable pages).
+ */
+export function isSpecialRouteName(routeName: string): boolean {
+	const base = routeName.split("/").filter(Boolean).pop() ?? "";
+	return (
+		base === "layout" ||
+		base === "loading" ||
+		base === "404" ||
+		base === "error" ||
+		base === "template" ||
+		base === "not-found"
+	);
+}
+
+/**
+ * Ignore build artifacts and package dirs so HMR rebuilds cannot re-trigger themselves.
+ */
+export function shouldIgnoreWatchPath(
+	projectRoot: string,
+	changedPath: string,
+): boolean {
+	const normalized = resolve(projectRoot, changedPath);
+	const rel = relative(projectRoot, normalized).replace(/\\/g, "/");
+	if (!rel || rel === "..") return true;
+	if (rel.startsWith("../") || isAbsolute(rel)) {
+		// Outside project — ignore (avoid watching unrelated system files)
+		return true;
+	}
+	return IGNORED_PATH_PREFIXES.some(
+		(prefix) => rel === prefix.slice(0, -1) || rel.startsWith(prefix),
+	);
+}
 
 const SPECIAL_BASENAMES = new Set([
 	"layout",
@@ -53,6 +106,15 @@ export function classifyWatchPath(
 	runtimePaths: string[] = [],
 ): WatchClassifyResult {
 	const normalizedPath = resolve(projectRoot, changedPath);
+
+	if (shouldIgnoreWatchPath(projectRoot, normalizedPath)) {
+		return {
+			kind: "ignored",
+			routeRelativePath: null,
+			pagePathname: null,
+		};
+	}
+
 	const resolvedRuntime = runtimePaths.map((p) => resolve(projectRoot, p));
 
 	if (resolvedRuntime.some((p) => p === normalizedPath)) {
@@ -146,6 +208,15 @@ export function filePathToPathname(fp: string) {
 	return fpNoExt.startsWith("/") ? fpNoExt : `/${fpNoExt}`;
 }
 
+const DEFAULT_WATCH_EXCLUDES = [
+	".frame-master",
+	"node_modules",
+	".git",
+	"dist",
+	"build",
+	"coverage",
+];
+
 export function resolveWatchDirectories(
 	projectRoot: string,
 	watchDirectories?: string[],
@@ -153,12 +224,15 @@ export function resolveWatchDirectories(
 ): string[] {
 	const include = watchDirectories ?? ["."];
 	const resolved = include.map((dir) => resolve(projectRoot, dir));
-	if (!watchDirectoriesExclude?.length) return resolved;
+	const excludes = [
+		...DEFAULT_WATCH_EXCLUDES,
+		...(watchDirectoriesExclude ?? []),
+	].map((dir) => resolve(projectRoot, dir));
 
-	const excludes = watchDirectoriesExclude.map((dir) =>
-		resolve(projectRoot, dir),
-	);
+	// Prefer watching the route tree when default "." would include build output.
+	// Callers still pass explicit watchDirectories when they want broader scope;
+	// ignored paths are also filtered in onFileSystemChange.
 	return resolved.filter(
-		(dir) => !excludes.some((ex) => dir === ex || dir.startsWith(ex + "/")),
+		(dir) => !excludes.some((ex) => dir === ex || dir.startsWith(`${ex}/`)),
 	);
 }

@@ -13,7 +13,9 @@ export { getRoutePathnameFromFileChange } from "./hmr/watch";
 export {
 	classifyWatchPath,
 	filePathToPathname,
+	isSpecialRouteName,
 	resolveWatchDirectories,
+	shouldIgnoreWatchPath,
 } from "./hmr/watch";
 export { extractImportSpecifiers } from "./hmr/deps";
 export { createHmrServer } from "./hmr/server";

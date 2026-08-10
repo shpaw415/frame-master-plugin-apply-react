@@ -1,4 +1,4 @@
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type { Builder } from "frame-master/build";
 import {
 	type DevRouteBuildResponse,
@@ -13,7 +13,9 @@ import { buildRouteDependencyIndex } from "./deps";
 import {
 	classifyWatchPath,
 	getRoutePathnameFromFileChange,
+	isSpecialRouteName,
 	resolveWatchDirectories,
+	shouldIgnoreWatchPath,
 } from "./watch";
 
 export type HmrClientState = {
@@ -78,11 +80,53 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	let depIndex = new Map<string, Set<string>>();
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	const pendingFsPaths = new Set<string>();
+	/** Suppress FS-driven rebuilds briefly after our own build writes outputs. */
+	let ignoreFsUntil = 0;
 
 	const log = (...args: unknown[]) => {
 		if (debug || process.env.DEBUG_APPLY_REACT === "1") {
 			console.log("[Apply-React HMR]", ...args);
 		}
+	};
+
+	const isPageRouteName = (name: string) => !isSpecialRouteName(name);
+
+	/** Collect navigable page routes only (never layout/loading/404 as build targets). */
+	const allPageRouteNames = (): string[] =>
+		Object.keys(fileRouter.routes).filter(isPageRouteName);
+
+	const expandRouteNamesToPageTargets = (
+		routeNames: Iterable<string>,
+	): DevBuildTarget[] => {
+		const pageNames = new Set<string>();
+		let sawSpecial = false;
+
+		for (const name of routeNames) {
+			if (isSpecialRouteName(name)) {
+				sawSpecial = true;
+				continue;
+			}
+			pageNames.add(name);
+		}
+
+		// Dep imported only by layout/loading/404 → rebuild pages that use those shells
+		if (sawSpecial) {
+			const active = activeRouteNames();
+			if (active.size > 0) {
+				for (const name of active) {
+					if (isPageRouteName(name)) pageNames.add(name);
+				}
+			} else {
+				for (const name of allPageRouteNames()) pageNames.add(name);
+			}
+		}
+
+		const targets: DevBuildTarget[] = [];
+		for (const name of pageNames) {
+			const t = matchRouteByName(name);
+			if (t) targets.push(t);
+		}
+		return targets;
 	};
 
 	const send = (
@@ -121,9 +165,14 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		const names = new Set<string>();
 		for (const client of clients.values()) {
 			const matched = fileRouter.match(client.pathname);
-			if (matched) names.add(matched.name);
+			if (matched && isPageRouteName(matched.name)) names.add(matched.name);
 		}
-		if (currentDevRoute) names.add(currentDevRoute.matchedRoute.name);
+		if (
+			currentDevRoute &&
+			isPageRouteName(currentDevRoute.matchedRoute.name)
+		) {
+			names.add(currentDevRoute.matchedRoute.name);
+		}
 		return names;
 	};
 
@@ -329,6 +378,8 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 
 	const onFileSystemChange = (absolutePath: string) => {
 		if (!enableHMR) return;
+		if (Date.now() < ignoreFsUntil) return;
+		if (shouldIgnoreWatchPath(cwd, absolutePath)) return;
 		pendingFsPaths.add(absolutePath);
 		if (debounceTimer) clearTimeout(debounceTimer);
 		debounceTimer = setTimeout(() => {
@@ -338,6 +389,7 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	};
 
 	const classifyAndHandle = (absolutePath: string) => {
+		if (shouldIgnoreWatchPath(cwd, absolutePath)) return;
 		log("file change", absolutePath);
 		const classified = classifyWatchPath(
 			cwd,
@@ -347,6 +399,8 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		);
 
 		switch (classified.kind) {
+			case "ignored":
+				return;
 			case "runtime": {
 				broadcast(
 					envelope({
@@ -360,17 +414,17 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 				if (!classified.pagePathname) return;
 				const matched = fileRouter.match(classified.pagePathname);
 				if (!matched) {
-					// try raw pathname from file
 					const alt = getRoutePathnameFromFileChange(
 						cwd,
 						routeDir,
 						absolutePath,
 					);
 					const m2 = alt ? fileRouter.match(alt) : null;
-					if (!m2) return;
+					if (!m2 || isSpecialRouteName(m2.name)) return;
 					queueTargets([{ matchedRoute: m2, pathname: m2.pathname }]);
 					return;
 				}
+				if (isSpecialRouteName(matched.name)) return;
 				queueTargets([
 					{ matchedRoute: matched, pathname: matched.pathname },
 				]);
@@ -379,50 +433,20 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 			case "layout":
 			case "loading":
 			case "not-found": {
-				// Rebuild all active client routes (layouts wrap them)
-				const targets: DevBuildTarget[] = [];
-				const names = activeRouteNames();
-				if (names.size === 0) {
-					// rebuild all page routes (not specials)
-					for (const [name, fp] of Object.entries(fileRouter.routes)) {
-						if (
-							name.endsWith("layout") ||
-							name.endsWith("loading") ||
-							name.endsWith("404")
-						) {
-							continue;
-						}
-						const t = matchRouteByName(name);
-						if (t) targets.push(t);
-					}
-				} else {
-					for (const name of names) {
-						const t = matchRouteByName(name);
-						if (t) targets.push(t);
-					}
-				}
-				queueTargets(targets);
+				// Never build layout/loading/404 as page targets — only pages
+				queueTargets(expandRouteNamesToPageTargets(["/layout"]));
 				return;
 			}
 			case "shared": {
-				const abs = absolutePath;
+				const abs = resolve(cwd, absolutePath);
 				const routeNames = depIndex.get(abs);
 				if (!routeNames || routeNames.size === 0) {
-					// unknown shared — rebuild active routes as safe default
-					const targets: DevBuildTarget[] = [];
-					for (const name of activeRouteNames()) {
-						const t = matchRouteByName(name);
-						if (t) targets.push(t);
-					}
-					if (targets.length) queueTargets(targets);
+					// Unknown shared module: rebuild active pages only (once)
+					queueTargets(expandRouteNamesToPageTargets(activeRouteNames()));
 					return;
 				}
-				const targets: DevBuildTarget[] = [];
-				for (const name of routeNames) {
-					const t = matchRouteByName(name);
-					if (t) targets.push(t);
-				}
-				queueTargets(targets);
+				// Expand layout-only importers to real pages (fixes layout-dep loops)
+				queueTargets(expandRouteNamesToPageTargets(routeNames));
 				return;
 			}
 			default:
@@ -431,9 +455,13 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	};
 
 	const handleAfterBuild = () => {
+		// Build may write under .frame-master — ignore those FS events briefly
+		ignoreFsUntil = Date.now() + Math.max(debounceMs * 4, 400);
 		if (!pendingRouteUpdate) return;
 		const target = pendingRouteUpdate;
 		pendingRouteUpdate = null;
+		// Never notify client with a special route as the hot page module
+		if (isSpecialRouteName(target.matchedRoute.name)) return;
 		broadcast(
 			envelope({
 				type: "update-routes",

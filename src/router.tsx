@@ -21,6 +21,7 @@ import {
 	requestDevRouteBuild,
 	setupHMR,
 } from "./HMR";
+import { isSpecialRouteName } from "./hmr/watch";
 import {
 	getRelatedLayoutEntriesFromPathname,
 	LayoutCache,
@@ -199,6 +200,13 @@ export function RouterHost({
 	const buildNoticeTimeoutRef = useRef<number | null>(null);
 	const lastGenerationRef = useRef(0);
 	const softFailCountRef = useRef(0);
+	/** True while applying an HMR update — blocks requestDevRouteBuild loops. */
+	const hmrApplyingRef = useRef(false);
+	const appliedHmrKeysRef = useRef(new Set<string>());
+	const routesRef = useRef(typeof window === "undefined" ? {} : _ROUTES_);
+	const setCurrentPageRef = useRef<
+		(pathname: string, routes: typeof _ROUTES_) => void
+	>(() => {});
 	const [pageKey, setPageKey] = useState(0);
 	const [activeLayouts, setActiveLayouts] = useState<LayoutEntry[]>(
 		() => initialSnapshot?.layouts ?? [],
@@ -248,12 +256,14 @@ export function RouterHost({
 
 			const importer = routes[matched.name];
 			if (!importer) {
-				return HMR_ENABLED
-					? { status: "awaiting-dev-build", matched }
-					: {
-							status: "not-found",
-							Page: await getNotFoundComponent(pathname),
-						};
+				// During HMR apply, never ask the server to rebuild — that loops.
+				if (HMR_ENABLED && !hmrApplyingRef.current) {
+					return { status: "awaiting-dev-build", matched };
+				}
+				return {
+					status: "not-found",
+					Page: await getNotFoundComponent(pathname),
+				};
 			}
 
 			try {
@@ -270,7 +280,11 @@ export function RouterHost({
 					Page: () => <Page />,
 				};
 			} catch (error) {
-				if (HMR_ENABLED && isMissingRouteModuleError(error)) {
+				if (
+					HMR_ENABLED &&
+					!hmrApplyingRef.current &&
+					isMissingRouteModuleError(error)
+				) {
 					return { status: "awaiting-dev-build", matched };
 				}
 
@@ -376,6 +390,8 @@ export function RouterHost({
 	const [routes, setRoutes] = useState(
 		typeof window === "undefined" ? {} : _ROUTES_,
 	);
+	routesRef.current = routes;
+	setCurrentPageRef.current = setCurrentPage;
 
 	// Eagerly import all loading components on mount so they're in the module
 	// cache before any navigation occurs. This ensures getLoadingComponent()
@@ -386,127 +402,179 @@ export function RouterHost({
 		});
 	}, []);
 
-	// HMR setup — soft update → remount → full reload ladder
-	useEffect(
-		() =>
-			HMR_ENABLED
-				? setupHMR({
-						onStatusChange: (status) => {
-							setHmrStatus((prev) =>
-								prev === "building" || prev === "failed" ? prev : status,
-							);
-						},
-						getPathname: () => window.location.pathname,
-						onRouteBuildStarted: ({ pathname, routeName, generation }) => {
-							if (generation < lastGenerationRef.current) return;
-							const pendingRoute = pendingDevRouteRef.current;
-							if (pendingRoute && pendingRoute.routeName !== routeName) return;
-							setHmrStatus("building");
-							setHmrError(null);
-							showBuildNotice(pathname);
-						},
-						onRoutesUpdate: async (newRoutes) => {
-							if (newRoutes.generation < lastGenerationRef.current) return;
-							lastGenerationRef.current = newRoutes.generation;
-							setHmrError(null);
+	// HMR setup once — callbacks use refs so identity changes cannot re-subscribe
+	// (re-subscribe was a source of client-side update loops).
+	useEffect(() => {
+		if (!HMR_ENABLED) return;
 
-							try {
-								const HotPage = await newRoutes.component();
-								if (!HotPage)
-									throw new Error("Hot module exported empty default");
+		const applyHotUpdate = async (newRoutes: {
+			pathname: string;
+			routeName: string;
+			generation: number;
+			component: () => Promise<() => JSX.Element>;
+		}) => {
+			const applyKey = `${newRoutes.generation}:${newRoutes.routeName}:${newRoutes.pathname}`;
+			if (newRoutes.generation < lastGenerationRef.current) return;
+			if (appliedHmrKeysRef.current.has(applyKey)) return;
+			// Cap set size
+			if (appliedHmrKeysRef.current.size > 100) {
+				appliedHmrKeysRef.current.clear();
+			}
+			appliedHmrKeysRef.current.add(applyKey);
+			if (newRoutes.generation > lastGenerationRef.current) {
+				lastGenerationRef.current = newRoutes.generation;
+			}
 
-								LayoutCache.clear();
-								const nextRoutesRef = {
-									current: null as null | typeof _ROUTES_,
-								};
-								setRoutes((curr) => {
-									const next = {
-										...curr,
-										[newRoutes.routeName]: newRoutes.component,
-									};
-									nextRoutesRef.current = next;
-									return next;
-								});
-								const nextRoutes = nextRoutesRef.current ?? {
-									[newRoutes.routeName]: newRoutes.component,
-								};
+			// Layout/loading/404 modules are not pages — refresh shells only once
+			if (isSpecialRouteName(newRoutes.routeName)) {
+				if (hmrApplyingRef.current) return;
+				hmrApplyingRef.current = true;
+				try {
+					LayoutCache.clear();
+					setRoutes((curr) => ({
+						...curr,
+						[newRoutes.routeName]: newRoutes.component,
+					}));
+					const next = {
+						...routesRef.current,
+						[newRoutes.routeName]: newRoutes.component,
+					};
+					await setCurrentPageRef.current(window.location.pathname, next);
+					hideBuildNotice();
+					setHmrStatus("live");
+					setHmrError(null);
+				} finally {
+					hmrApplyingRef.current = false;
+				}
+				return;
+			}
 
-								const pendingRoute = pendingDevRouteRef.current;
-								if (pendingRoute?.routeName === newRoutes.routeName) {
-									pendingDevRouteRef.current = null;
-									await setCurrentPage(pendingRoute.pathname, nextRoutes);
-								} else if (
-									router.match(window.location.pathname)?.name ===
-									newRoutes.routeName
-								) {
-									_setCurrentPage(() => () => <HotPage />);
-									setPageKey((k) => k + 1);
-								} else {
-									await setCurrentPage(window.location.pathname, nextRoutes);
-								}
-								softFailCountRef.current = 0;
-								hideBuildNotice();
-								setHmrStatus("live");
-							} catch (error) {
-								console.error(
-									"[Apply-React HMR] Soft update failed, attempting remount",
-									error,
-								);
-								softFailCountRef.current += 1;
-								try {
-									LayoutCache.clear();
-									setPageKey((k) => k + 1);
-									const nextRoutesRef = {
-										current: null as null | typeof _ROUTES_,
-									};
-									setRoutes((curr) => {
-										const next = {
-											...curr,
-											[newRoutes.routeName]: newRoutes.component,
-										};
-										nextRoutesRef.current = next;
-										return next;
-									});
-									await setCurrentPage(
-										window.location.pathname,
-										nextRoutesRef.current ?? {
-											[newRoutes.routeName]: newRoutes.component,
-										},
-									);
-									softFailCountRef.current = 0;
-									hideBuildNotice();
-									setHmrStatus("live");
-								} catch (remountError) {
-									console.error(
-										"[Apply-React HMR] Remount failed, full reload",
-										remountError,
-									);
-									window.location.reload();
-								}
-							}
-						},
-						onRouteBuildMissing: ({ pathname, generation }) => {
-							if (generation < lastGenerationRef.current) return;
-							const pendingRoute = pendingDevRouteRef.current;
-							if (!pendingRoute || pendingRoute.pathname !== pathname) return;
-							hideBuildNotice();
-							setHmrStatus("live");
-							void setNotFoundPage(pathname, pendingRoute.navigationId);
-						},
-						onBuildFailed: ({ error, generation }) => {
-							if (generation < lastGenerationRef.current) return;
-							setHmrStatus("failed");
-							setHmrError(error.message);
-							hideBuildNotice();
-						},
-						onFullReload: ({ reason }) => {
-							console.info("[Apply-React HMR] Full reload:", reason);
-							window.location.reload();
-						},
-					})
-				: undefined,
-		[hideBuildNotice, setCurrentPage, setNotFoundPage, showBuildNotice],
-	);
+			if (hmrApplyingRef.current) return;
+			hmrApplyingRef.current = true;
+			setHmrError(null);
+
+			try {
+				const HotPage = await newRoutes.component();
+				if (!HotPage) throw new Error("Hot module exported empty default");
+
+				LayoutCache.clear();
+				const nextRoutes = {
+					...routesRef.current,
+					[newRoutes.routeName]: newRoutes.component,
+				};
+				setRoutes(nextRoutes);
+				routesRef.current = nextRoutes;
+
+				const pendingRoute = pendingDevRouteRef.current;
+				const currentName = router.match(window.location.pathname)?.name;
+
+				if (pendingRoute?.routeName === newRoutes.routeName) {
+					pendingDevRouteRef.current = null;
+					// Soft-swap without going through awaiting-dev-build again
+					_setCurrentPage(() => () => <HotPage />);
+					setPageKey((k) => k + 1);
+					// Refresh layouts for pending navigation target
+					const layouts = await getRelatedLayoutEntriesFromPathname(
+						pendingRoute.pathname,
+						nextRoutes,
+					);
+					setActiveLayouts(layouts);
+				} else if (currentName === newRoutes.routeName) {
+					_setCurrentPage(() => () => <HotPage />);
+					setPageKey((k) => k + 1);
+					const layouts = await getRelatedLayoutEntriesFromPathname(
+						window.location.pathname,
+						nextRoutes,
+					);
+					setActiveLayouts(layouts);
+				} else {
+					// Different route finished building — only refresh registry;
+					// do not re-navigate (avoids thrash / loops).
+				}
+
+				softFailCountRef.current = 0;
+				hideBuildNotice();
+				setHmrStatus("live");
+			} catch (error) {
+				console.error(
+					"[Apply-React HMR] Soft update failed, attempting remount",
+					error,
+				);
+				softFailCountRef.current += 1;
+				try {
+					LayoutCache.clear();
+					const nextRoutes = {
+						...routesRef.current,
+						[newRoutes.routeName]: newRoutes.component,
+					};
+					setRoutes(nextRoutes);
+					routesRef.current = nextRoutes;
+					setPageKey((k) => k + 1);
+					// Remount current page from registry — still no requestDevRouteBuild
+					const resolved = await resolveRoute(
+						window.location.pathname,
+						nextRoutes,
+					);
+					if (resolved.status === "ready" || resolved.status === "not-found") {
+						_setCurrentPage(() => resolved.Page);
+					}
+					softFailCountRef.current = 0;
+					hideBuildNotice();
+					setHmrStatus("live");
+				} catch (remountError) {
+					console.error(
+						"[Apply-React HMR] Remount failed, full reload",
+						remountError,
+					);
+					// Only hard-reload once after repeated soft failures
+					if (softFailCountRef.current >= 2) {
+						window.location.reload();
+					}
+				}
+			} finally {
+				hmrApplyingRef.current = false;
+			}
+		};
+
+		return setupHMR({
+			onStatusChange: (status) => {
+				setHmrStatus((prev) =>
+					prev === "building" || prev === "failed" ? prev : status,
+				);
+			},
+			getPathname: () => window.location.pathname,
+			onRouteBuildStarted: ({ pathname, routeName, generation }) => {
+				if (generation < lastGenerationRef.current) return;
+				const pendingRoute = pendingDevRouteRef.current;
+				if (pendingRoute && pendingRoute.routeName !== routeName) return;
+				setHmrStatus("building");
+				setHmrError(null);
+				showBuildNotice(pathname);
+			},
+			onRoutesUpdate: applyHotUpdate,
+			onRouteBuildMissing: ({ pathname, generation }) => {
+				if (generation < lastGenerationRef.current) return;
+				const pendingRoute = pendingDevRouteRef.current;
+				if (!pendingRoute || pendingRoute.pathname !== pathname) return;
+				pendingDevRouteRef.current = null;
+				hideBuildNotice();
+				setHmrStatus("live");
+				void setNotFoundPage(pathname, pendingRoute.navigationId);
+			},
+			onBuildFailed: ({ error, generation }) => {
+				if (generation < lastGenerationRef.current) return;
+				pendingDevRouteRef.current = null;
+				setHmrStatus("failed");
+				setHmrError(error.message);
+				hideBuildNotice();
+			},
+			onFullReload: ({ reason }) => {
+				console.info("[Apply-React HMR] Full reload:", reason);
+				window.location.reload();
+			},
+		});
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once HMR
+	}, []);
 
 	useEffect(
 		() => () => {
