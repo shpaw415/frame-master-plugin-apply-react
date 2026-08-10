@@ -47,6 +47,17 @@ export type FullReloadMessage = {
 	reason: string;
 };
 
+/** Per-file module graph: invalidate one stable module URL */
+export type InvalidateModuleMessage = {
+	v: typeof HMR_PROTOCOL_VERSION;
+	generation: number;
+	type: "invalidate-module";
+	/** Path relative to moduleRoot, e.g. pages/index.tsx */
+	path: string;
+	/** Cache-bust token */
+	t: number;
+};
+
 export type ServerHelloMessage = {
 	v: typeof HMR_PROTOCOL_VERSION;
 	generation: number;
@@ -76,6 +87,7 @@ export type HMRServerMessage =
 	| RouteBuildMissingMessage
 	| RouteBuildFailedMessage
 	| FullReloadMessage
+	| InvalidateModuleMessage
 	| ServerHelloMessage
 	| PongMessage;
 
@@ -190,6 +202,17 @@ export function parseHmrMessage(raw: unknown): HMRMessage | null {
 					generation: numberOrZero(msg.generation),
 					type: "full-reload",
 					reason: msg.reason,
+				};
+			}
+			return null;
+		case "invalidate-module":
+			if (typeof msg.path === "string" && typeof msg.t === "number") {
+				return {
+					v: HMR_PROTOCOL_VERSION,
+					generation: numberOrZero(msg.generation),
+					type: "invalidate-module",
+					path: msg.path,
+					t: msg.t,
 				};
 			}
 			return null;

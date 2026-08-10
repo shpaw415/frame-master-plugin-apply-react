@@ -72,6 +72,50 @@ describe("integration: apply-react boot + HMR HTTP", () => {
 		});
 	}, 60_000);
 
+	test("per-file mod endpoint serves transpiled modules", async () => {
+		await withTempDir(async (dir) => {
+			await writeMinimalApp(dir);
+			await writeFixture(
+				dir,
+				"src/ctx.ts",
+				`export const marker = "context-ok";\n`,
+			);
+			await writeFixture(
+				dir,
+				"src/pages/index.tsx",
+				`import { marker } from "../ctx";\nexport default function Home() { return <h1>{marker}</h1>; }\n`,
+			);
+			const prev = process.cwd();
+			process.chdir(dir);
+			try {
+				env = await createPluginTestEnv({
+					cwd: dir,
+					startServer: true,
+					plugins: [
+						ApplyReact({
+							style: "nextjs",
+							route: "src/pages",
+							moduleRoot: "src",
+							clientShellPath: "src/client-shell.tsx",
+							enableHMR: true,
+							hydration: "render",
+							hmr: { moduleGraph: "per-file" },
+						}),
+					],
+				});
+				const base = env.baseUrl!;
+				const res = await nativeFetch(
+					`${base}/@apply-react/mod/pages/index.tsx`,
+				);
+				expect(res.status).toBe(200);
+				const code = await res.text();
+				expect(code).toContain("/@apply-react/mod/ctx");
+			} finally {
+				process.chdir(prev);
+			}
+		});
+	}, 60_000);
+
 	test("HMR build-route API responds", async () => {
 		await withTempDir(async (dir) => {
 			await writeMinimalApp(dir);

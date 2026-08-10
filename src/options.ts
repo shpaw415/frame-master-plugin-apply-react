@@ -9,20 +9,42 @@ export type ApplyReactHmrOptions = {
 	fullReloadOnRuntimeChange?: boolean;
 	/** Show client error overlay (default true). */
 	overlay?: boolean;
+	/**
+	 * Dev module graph strategy.
+	 * - `per-file` (default when HMR on): stable `/@apply-react/mod/*` URLs, no shared app chunks
+	 * - `bundled`: legacy selective route bundles with splitting
+	 */
+	moduleGraph?: "bundled" | "per-file";
+	/**
+	 * Which files under `moduleRoot` participate in discovery (build seeds / docs).
+	 * - `reachable` (default): from routes + shell
+	 * - `all`: every source file under moduleRoot
+	 */
+	entrypointMode?: "reachable" | "all";
+	/**
+	 * Prefer soft page swaps without remounting ErrorWrapper (default true).
+	 */
+	preserveState?: boolean;
 };
 
 export type ApplyReactPluginOptions = {
 	/** Routing style convention (currently supports "nextjs") */
 	style: "nextjs";
 
-	/** Base path to the routes directory (e.g., "src/pages") */
+	/** Base path to the routes directory (e.g., "src/pages" or "app/pages") */
 	route: string;
+
+	/**
+	 * Root directory for stable per-file modules (customizable — not fixed to "src").
+	 * Inferred from `route` when omitted (parent of `…/pages`, else `src` if present).
+	 */
+	moduleRoot?: string;
 
 	/**
 	 * Optional path to a custom client-side shell component
 	 *
 	 * Used as a wrapper for the RouterHost or global shell during hydration.
-	 * If not provided, the default client shell will be used.
+	 * Put durable React providers here (above RouterHost) so they survive page HMR.
 	 */
 	clientShellPath?: string;
 
@@ -52,7 +74,7 @@ export type ApplyReactPluginOptions = {
 
 	/**
 	 * Directories watched for HMR file changes (project-root relative).
-	 * @default ["."]
+	 * @default [moduleRoot]
 	 */
 	watchDirectories?: string[];
 

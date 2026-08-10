@@ -112,11 +112,20 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 | `route`           | `string`    | -           | Base path to your routes directory                          |
 | `clientShellPath` | `string?`   | -           | Optional path to a custom client-side shell component       |
 | `enableHMR`               | `boolean`   | `true` in dev | Enable Hot Module Replacement for development                          |
+| `moduleRoot`              | `string?`   | inferred    | App source root for per-file modules (not fixed to `src`; e.g. `app`)  |
 | `hydration`               | `"hydrate" \| "render"` | `"hydrate"` | `hydrate` attaches to SSG HTML; `render` uses `createRoot` |
-| `watchDirectories`        | `string[]?` | `['.']`     | Directories watched for HMR file changes (project-root relative)       |
+| `watchDirectories`        | `string[]?` | `[moduleRoot]` in per-file HMR | Directories watched for HMR file changes |
 | `watchDirectoriesExclude` | `string[]?` | -           | Directories excluded from HMR watching                                 |
-| `hmr`                     | `object?`   | -           | Advanced HMR: `debounceMs`, `heartbeatMs`, `reconnect`, `overlay`      |
+| `hmr`                     | `object?`   | -           | `moduleGraph` (`per-file`\|`bundled`), `preserveState`, debounce, overlay |
 | `debug`                   | `boolean?`  | `false`     | Verbose Apply-React logs (`DEBUG_APPLY_REACT=1`)                        |
+
+### Dev HMR: per-file modules (default)
+
+When HMR is on, modules under `moduleRoot` are served at stable URLs:
+
+`/@apply-react/mod/<path-relative-to-moduleRoot>`
+
+Editing a **page** re-imports only that file (`?t=`). Shared modules (e.g. `createContext` files) keep the same URL so React context identity is preserved. Put durable providers in `client-shell.tsx` **above** `RouterHost`.
 
 ## How It Works
 

@@ -36,6 +36,10 @@ export type CreateHmrServerOptions = {
 	runtimePaths?: string[];
 	debounceMs?: number;
 	debug?: boolean;
+	/** Absolute module root for per-file graph */
+	moduleRootAbs?: string;
+	/** When true, FS changes under moduleRoot emit invalidate-module (no full route bundle) */
+	perFileGraph?: boolean;
 };
 
 export type HmrServer = {
@@ -69,6 +73,8 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		runtimePaths = [],
 		debounceMs = 75,
 		debug = false,
+		moduleRootAbs,
+		perFileGraph = false,
 	} = options;
 
 	const queue = new DevBuildQueue();
@@ -434,6 +440,49 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	const classifyAndHandle = (absolutePath: string) => {
 		if (shouldIgnoreWatchPath(cwd, absolutePath)) return;
 		log("file change", absolutePath);
+
+		// Per-file graph: notify client to re-import only this stable module URL
+		if (
+			perFileGraph &&
+			moduleRootAbs &&
+			resolve(absolutePath).startsWith(moduleRootAbs)
+		) {
+			const classifiedEarly = classifyWatchPath(
+				cwd,
+				routeDir,
+				absolutePath,
+				runtimePaths,
+			);
+			if (classifiedEarly.kind === "runtime") {
+				broadcast(
+					envelope({
+						type: "full-reload",
+						reason: `Runtime module changed: ${absolutePath}`,
+					}),
+				);
+				return;
+			}
+			if (classifiedEarly.kind === "ignored") return;
+
+			const rel = relative(moduleRootAbs, resolve(absolutePath)).replace(
+				/\\/g,
+				"/",
+			);
+			if (!rel || rel.startsWith("..")) return;
+			const gen = nextGeneration();
+			broadcast(
+				envelope(
+					{
+						type: "invalidate-module",
+						path: rel,
+						t: Date.now(),
+					},
+					gen,
+				),
+			);
+			return;
+		}
+
 		const classified = classifyWatchPath(
 			cwd,
 			routeDir,

@@ -15,6 +15,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import ApplyReactPluginOptions from "@apply-react/props.ts";
 import {
 	type HmrConnectionStatus,
 	reportActivePathname,
@@ -24,11 +25,25 @@ import {
 import { isSpecialRouteName } from "./hmr/watch";
 import {
 	getRelatedLayoutEntriesFromPathname,
+	invalidateLayoutCache,
 	LayoutCache,
 	type LayoutEntry,
 	WrapWithLayouts,
 } from "./layout";
 import { getLocationHref, isSameLocation, NotFoundError } from "./utils";
+
+const PRESERVE_STATE =
+	(ApplyReactPluginOptions as { hmr?: { preserveState?: boolean } })?.hmr
+		?.preserveState !== false;
+
+/** Map moduleRoot-relative path to FS-router special/page key segment */
+function modPathToRouteKey(path: string): string {
+	const stripped = path
+		.replace(/\\/g, "/")
+		.replace(/^(pages|page)\//, "")
+		.replace(/\.(tsx|jsx|ts|js)$/i, "");
+	return stripped.startsWith("/") ? stripped : `/${stripped || ""}`;
+}
 
 export const router = new FileSystemRouter({
 	routes: Object.keys(_ROUTES_),
@@ -483,7 +498,7 @@ export function RouterHost({
 				const HotPage = await newRoutes.component();
 				if (!HotPage) throw new Error("Hot module exported empty default");
 
-				LayoutCache.clear();
+				// Page-only: do not clear layout cache (preserves layout module identity)
 				const nextRoutes = {
 					...routesRef.current,
 					[newRoutes.routeName]: newRoutes.component,
@@ -496,26 +511,13 @@ export function RouterHost({
 
 				if (pendingRoute?.routeName === newRoutes.routeName) {
 					pendingDevRouteRef.current = null;
-					// Soft-swap without going through awaiting-dev-build again
 					_setCurrentPage(() => () => <HotPage />);
-					setPageKey((k) => k + 1);
-					// Refresh layouts for pending navigation target
-					const layouts = await getRelatedLayoutEntriesFromPathname(
-						pendingRoute.pathname,
-						nextRoutes,
-					);
-					setActiveLayouts(layouts);
+					if (!PRESERVE_STATE) setPageKey((k) => k + 1);
 				} else if (currentName === newRoutes.routeName) {
 					_setCurrentPage(() => () => <HotPage />);
-					setPageKey((k) => k + 1);
-					const layouts = await getRelatedLayoutEntriesFromPathname(
-						window.location.pathname,
-						nextRoutes,
-					);
-					setActiveLayouts(layouts);
+					if (!PRESERVE_STATE) setPageKey((k) => k + 1);
 				} else {
 					// Different route finished building — only refresh registry.
-					// Layout shell updates arrive as a follow-up message.
 				}
 
 				softFailCountRef.current = 0;
@@ -597,6 +599,78 @@ export function RouterHost({
 			onFullReload: ({ reason }) => {
 				console.info("[Apply-React HMR] Full reload:", reason);
 				window.location.reload();
+			},
+			onInvalidateModule: async ({ path, t, generation }) => {
+				if (generation < lastGenerationRef.current) return;
+				if (generation > lastGenerationRef.current) {
+					lastGenerationRef.current = generation;
+				}
+
+				const base = path.replace(/\\/g, "/");
+				const fileBase = base.split("/").pop() ?? "";
+				const isShell =
+					/^(layout|loading|404|error|template|not-found)\.(t|j)sx?$/i.test(
+						fileBase,
+					);
+				const looksLikeRouteFile =
+					isShell || /(^|\/)(pages|page)\//.test(base);
+
+				// Shared modules (context, utils): full reload so import graph rebinds
+				if (!looksLikeRouteFile) {
+					console.info(
+						"[Apply-React HMR] Non-route module changed, full reload:",
+						path,
+					);
+					window.location.reload();
+					return;
+				}
+
+				if (hmrApplyingRef.current) return;
+				hmrApplyingRef.current = true;
+				setHmrStatus("building");
+				try {
+					const modUrl = `/@apply-react/mod/${base}?t=${t}`;
+					const mod = await import(/* webpackIgnore: true */ modUrl);
+					const Hot = mod.default as (() => JSX.Element) | undefined;
+					if (!Hot) throw new Error(`No default export: ${path}`);
+
+					const routeKey = modPathToRouteKey(base);
+
+					if (isShell) {
+						invalidateLayoutCache(routeKey);
+						const next = {
+							...routesRef.current,
+							[routeKey]: async () => Hot,
+						};
+						routesRef.current = next;
+						setRoutes(next);
+						const layouts = await getRelatedLayoutEntriesFromPathname(
+							window.location.pathname,
+							next,
+						);
+						setActiveLayouts(layouts);
+						setPageKey((k) => k + 1);
+					} else {
+						const matched = router.match(window.location.pathname);
+						const pageKeyName = matched?.name ?? routeKey;
+						const next = {
+							...routesRef.current,
+							[pageKeyName]: async () => Hot,
+						};
+						routesRef.current = next;
+						setRoutes(next);
+						_setCurrentPage(() => () => <Hot />);
+						if (!PRESERVE_STATE) setPageKey((k) => k + 1);
+					}
+					hideBuildNotice();
+					setHmrStatus("live");
+					setHmrError(null);
+				} catch (error) {
+					console.error("[Apply-React HMR] invalidate-module failed", error);
+					window.location.reload();
+				} finally {
+					hmrApplyingRef.current = false;
+				}
 			},
 		});
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once HMR

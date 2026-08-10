@@ -44,6 +44,12 @@ type SetupHMRCallbacks = {
 		reason: string;
 		generation: number;
 	}) => Promise<void> | void;
+	/** Per-file graph: a single module under moduleRoot changed */
+	onInvalidateModule?: (payload: {
+		path: string;
+		t: number;
+		generation: number;
+	}) => Promise<void> | void;
 	onStatusChange?: (status: HmrConnectionStatus) => void;
 	getPathname?: () => string;
 	tabId?: string;
@@ -255,6 +261,13 @@ export function setupHMR(
 			case "full-reload":
 				await opts.onFullReload?.({
 					reason: message.reason,
+					generation: message.generation,
+				});
+				return;
+			case "invalidate-module":
+				await opts.onInvalidateModule?.({
+					path: message.path,
+					t: message.t,
 					generation: message.generation,
 				});
 				return;
