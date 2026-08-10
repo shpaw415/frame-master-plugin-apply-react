@@ -12,6 +12,7 @@ import { type DevBuildTarget, DevBuildQueue } from "./queue";
 import { buildRouteDependencyIndex } from "./deps";
 import {
 	classifyWatchPath,
+	filePathToPathname,
 	getRoutePathnameFromFileChange,
 	isSpecialRouteName,
 	resolveWatchDirectories,
@@ -82,6 +83,11 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	const pendingFsPaths = new Set<string>();
 	/** Suppress FS-driven rebuilds briefly after our own build writes outputs. */
 	let ignoreFsUntil = 0;
+	/**
+	 * Shell modules (layout/loading/404) to notify after page rebuilds finish.
+	 * Key = route name (`/layout`), value = built js path relative to routes dir.
+	 */
+	const pendingShellNotifies = new Map<string, string>();
 
 	const log = (...args: unknown[]) => {
 		if (debug || process.env.DEBUG_APPLY_REACT === "1") {
@@ -240,6 +246,43 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	const queueTargets = (targets: DevBuildTarget[]) => {
 		for (const t of targets) {
 			queue.enqueue(t);
+		}
+		if (queue.isEmpty && pendingShellNotifies.size > 0) {
+			// Layout-only project edge case: no page targets — still rebuild shells
+			void (async () => {
+				const builder = liveBuilder;
+				if (!builder) {
+					flushShellNotifies();
+					return;
+				}
+				try {
+					currentDevRoute = null;
+					pendingRouteUpdate = null;
+					const gen = nextGeneration();
+					broadcast(
+						envelope(
+							{
+								type: "route-build-started",
+								pathname: "/",
+								routeName: "/",
+							},
+							gen,
+						),
+					);
+					await builder.build();
+				} catch (error) {
+					broadcast(
+						envelope({
+							type: "build-failed",
+							error: errorToPayload(error),
+						}),
+					);
+				} finally {
+					ignoreFsUntil = Date.now() + Math.max(debounceMs * 4, 400);
+					flushShellNotifies();
+				}
+			})();
+			return;
 		}
 		void runQueuedDevBuilds();
 	};
@@ -433,8 +476,17 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 			case "layout":
 			case "loading":
 			case "not-found": {
-				// Never build layout/loading/404 as page targets — only pages
-				queueTargets(expandRouteNamesToPageTargets(["/layout"]));
+				// Rebuild pages that use the shell, then notify client with a
+				// cache-busted shell module (layout itself is not a navigable page).
+				const rel = classified.routeRelativePath;
+				if (rel) {
+					const shellRouteName = filePathToPathname(rel);
+					const shellJs = rel.replace(/\.(tsx|jsx|ts|js)$/i, ".js");
+					pendingShellNotifies.set(shellRouteName, shellJs);
+					queueTargets(expandRouteNamesToPageTargets([shellRouteName]));
+				} else {
+					queueTargets(expandRouteNamesToPageTargets(activeRouteNames()));
+				}
 				return;
 			}
 			case "shared": {
@@ -454,22 +506,49 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		}
 	};
 
+	const flushShellNotifies = () => {
+		if (pendingShellNotifies.size === 0) return;
+		const gen = generation;
+		for (const [routeName, routeJs] of pendingShellNotifies) {
+			log("notify shell update", routeName, routeJs);
+			broadcast(
+				envelope(
+					{
+						type: "update-routes",
+						route: routeJs,
+						pathname: routeName,
+						routeName,
+					},
+					gen,
+				),
+			);
+		}
+		pendingShellNotifies.clear();
+	};
+
 	const handleAfterBuild = () => {
 		// Build may write under .frame-master — ignore those FS events briefly
 		ignoreFsUntil = Date.now() + Math.max(debounceMs * 4, 400);
-		if (!pendingRouteUpdate) return;
-		const target = pendingRouteUpdate;
-		pendingRouteUpdate = null;
-		// Never notify client with a special route as the hot page module
-		if (isSpecialRouteName(target.matchedRoute.name)) return;
-		broadcast(
-			envelope({
-				type: "update-routes",
-				route: buildRouteUpdatePath(target),
-				pathname: target.pathname,
-				routeName: target.matchedRoute.name,
-			}),
-		);
+		if (pendingRouteUpdate) {
+			const target = pendingRouteUpdate;
+			pendingRouteUpdate = null;
+			// Page module update (never treat layout/loading/404 as the page)
+			if (!isSpecialRouteName(target.matchedRoute.name)) {
+				broadcast(
+					envelope({
+						type: "update-routes",
+						route: buildRouteUpdatePath(target),
+						pathname: target.pathname,
+						routeName: target.matchedRoute.name,
+					}),
+				);
+			}
+		}
+		// After the selective rebuild queue drains, push shell (layout) updates
+		// so the client cache-busts layout importers and remounts the tree.
+		if (queue.isEmpty) {
+			flushShellNotifies();
+		}
 	};
 
 	const refreshDependencyIndex = async () => {

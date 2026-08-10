@@ -14,16 +14,24 @@ export const LayoutCache = new Map<string, LayoutComponent>();
 async function getLayoutComponent(
 	layouts: typeof _ROUTES_,
 	layoutPath: string,
+	options?: { bypassCache?: boolean },
 ) {
-	if (!LayoutCache.has(layoutPath)) {
-		const Layout = await layouts[layoutPath]?.();
-		if (!Layout) {
-			throw new Error(`Missing layout component for ${layoutPath}`);
-		}
-		LayoutCache.set(layoutPath, Layout);
+	if (!options?.bypassCache && LayoutCache.has(layoutPath)) {
+		return LayoutCache.get(layoutPath) as LayoutComponent;
 	}
 
-	return LayoutCache.get(layoutPath) as LayoutComponent;
+	const Layout = await layouts[layoutPath]?.();
+	if (!Layout) {
+		throw new Error(`Missing layout component for ${layoutPath}`);
+	}
+	LayoutCache.set(layoutPath, Layout);
+	return Layout;
+}
+
+/** Drop cached layout components (call on HMR shell updates). */
+export function invalidateLayoutCache(layoutPath?: string) {
+	if (layoutPath) LayoutCache.delete(layoutPath);
+	else LayoutCache.clear();
 }
 
 export async function getRelatedLayoutEntriesFromPathname(

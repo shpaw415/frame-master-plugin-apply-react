@@ -425,24 +425,50 @@ export function RouterHost({
 				lastGenerationRef.current = newRoutes.generation;
 			}
 
-			// Layout/loading/404 modules are not pages — refresh shells only once
+			// Layout/loading/404 — swap shell importers and remount under new layouts
 			if (isSpecialRouteName(newRoutes.routeName)) {
 				if (hmrApplyingRef.current) return;
 				hmrApplyingRef.current = true;
 				try {
-					LayoutCache.clear();
-					setRoutes((curr) => ({
-						...curr,
-						[newRoutes.routeName]: newRoutes.component,
-					}));
+					// Verify the hot shell module loads
+					const HotShell = await newRoutes.component();
+					if (!HotShell) throw new Error("Hot shell exported empty default");
+
+					LayoutCache.delete(newRoutes.routeName);
 					const next = {
 						...routesRef.current,
-						[newRoutes.routeName]: newRoutes.component,
+						// Prefer resolved component so layout does not re-fetch a stale URL
+						[newRoutes.routeName]: async () => HotShell,
 					};
-					await setCurrentPageRef.current(window.location.pathname, next);
+					routesRef.current = next;
+					setRoutes(next);
+
+					const layouts = await getRelatedLayoutEntriesFromPathname(
+						window.location.pathname,
+						next,
+					);
+					setActiveLayouts(layouts);
+					// Force ErrorWrapper + page tree to remount under new Layout instances
+					setPageKey((k) => k + 1);
 					hideBuildNotice();
 					setHmrStatus("live");
 					setHmrError(null);
+					softFailCountRef.current = 0;
+				} catch (error) {
+					console.error("[Apply-React HMR] Layout/shell update failed", error);
+					// Fall back: clear cache and remount current page once
+					LayoutCache.clear();
+					setPageKey((k) => k + 1);
+					try {
+						await setCurrentPageRef.current(
+							window.location.pathname,
+							routesRef.current,
+						);
+					} catch {
+						// ignore
+					}
+					hideBuildNotice();
+					setHmrStatus("live");
 				} finally {
 					hmrApplyingRef.current = false;
 				}
@@ -488,8 +514,8 @@ export function RouterHost({
 					);
 					setActiveLayouts(layouts);
 				} else {
-					// Different route finished building — only refresh registry;
-					// do not re-navigate (avoids thrash / loops).
+					// Different route finished building — only refresh registry.
+					// Layout shell updates arrive as a follow-up message.
 				}
 
 				softFailCountRef.current = 0;
