@@ -113,9 +113,23 @@ function resolveSpecifier(
 	return null;
 }
 
+/** Encode moduleRoot-relative path for use in `/@apply-react/mod/...` URLs. */
+export function encodeModRelPath(rel: string): string {
+	return rel
+		.replace(/\\/g, "/")
+		.split("/")
+		.filter(Boolean)
+		.map((seg) => encodeURIComponent(seg))
+		.join("/");
+}
+
+/**
+ * Stable browser URL for a module under moduleRoot.
+ * Path segments are encodeURIComponent'd so dynamic routes like `[id].tsx` work.
+ */
 export function toModUrl(moduleRootAbs: string, absoluteFile: string): string {
 	const rel = relative(moduleRootAbs, absoluteFile).replace(/\\/g, "/");
-	return `/@apply-react/mod/${rel}`;
+	return `/@apply-react/mod/${encodeModRelPath(rel)}`;
 }
 
 export function fromModUrlPath(
@@ -124,7 +138,18 @@ export function fromModUrlPath(
 ): string | null {
 	const prefix = "/@apply-react/mod/";
 	if (!urlPathname.startsWith(prefix)) return null;
-	const rel = decodeURIComponent(urlPathname.slice(prefix.length));
+	// Decode each segment (handles [id] → %5Bid%5D and plain paths)
+	const rel = urlPathname
+		.slice(prefix.length)
+		.split("/")
+		.map((seg) => {
+			try {
+				return decodeURIComponent(seg);
+			} catch {
+				return seg;
+			}
+		})
+		.join("/");
 	if (!rel || rel.includes("..")) return null;
 	const abs = resolve(moduleRootAbs, rel);
 	if (!abs.startsWith(moduleRootAbs)) return null;

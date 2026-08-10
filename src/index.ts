@@ -104,10 +104,13 @@ export default function applyReactPluginToHTML(
 
 	const routeImportLine = (pathname: string, fp: string) => {
 		if (perFileGraph) {
+			// Runtime-only browser URL — must stay external to the Bun build
+			// (see onResolve for /^\/@apply-react\/mod\//). Build-time resolution
+			// of absolute /@apply-react/mod/... paths fails (e.g. [id].tsx routes).
 			const mod = toModUrl(moduleRootAbs, fp);
-			return `"${pathname}": () => import("${mod}").then((mod) => mod.default)`;
+			return `"${pathname}": () => import(${JSON.stringify(mod)}).then((m) => m.default)`;
 		}
-		return `"${pathname}": () => import("${fp}").then((mod) => mod.default)`;
+		return `"${pathname}": () => import(${JSON.stringify(fp)}).then((m) => m.default)`;
 	};
 
 	const publicProps = {
@@ -188,7 +191,7 @@ export default function applyReactPluginToHTML(
 			onResolve: (
 				opts: { filter: RegExp },
 				cb: (args: { path: string }) =>
-					| { path: string; namespace?: string }
+					| { path: string; namespace?: string; external?: boolean }
 					| undefined,
 			) => void;
 			finally: (
@@ -197,6 +200,12 @@ export default function applyReactPluginToHTML(
 			) => void;
 		}) {
 			const files = virtualFiles();
+
+			// Browser-only per-file module URLs — never bundle/resolve at build time
+			build.onResolve({ filter: /^\/@apply-react\/mod\// }, (args) => ({
+				path: args.path,
+				external: true,
+			}));
 
 			// Ensure @apply-react/* virtuals resolve even when not yet pulled as deps
 			build.onResolve({ filter: /^@apply-react\// }, (args) => {
@@ -287,6 +296,8 @@ export default function applyReactPluginToHTML(
 					return {
 						entrypoints: [...DevReactEntryPoints, ...virtualRuntimeEntrypoints],
 						splitting: false,
+						// Absolute /@apply-react/mod/* imports are browser runtime URLs
+						external: [/^\/@apply-react\/mod\//],
 						files,
 						plugins: [applyReactBuildPlugin],
 					};
@@ -310,6 +321,7 @@ export default function applyReactPluginToHTML(
 		},
 		serverConfig: {
 			routes: {
+				// Bun route patterns: also match encoded dynamic segments (%5B id %5D)
 				"/@apply-react/mod/*": perFileGraph
 					? (req) => handleModRequest(req, moduleRootAbs)
 					: new Response("per-file module graph disabled", { status: 404 }),

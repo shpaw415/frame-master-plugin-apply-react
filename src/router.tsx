@@ -629,7 +629,13 @@ export function RouterHost({
 				hmrApplyingRef.current = true;
 				setHmrStatus("building");
 				try {
-					const modUrl = `/@apply-react/mod/${base}?t=${t}`;
+					// Encode [param] segments the same way as toModUrl / server
+					const encodedPath = base
+						.split("/")
+						.filter(Boolean)
+						.map((seg) => encodeURIComponent(seg))
+						.join("/");
+					const modUrl = `/@apply-react/mod/${encodedPath}?t=${t}`;
 					const mod = await import(/* webpackIgnore: true */ modUrl);
 					const Hot = mod.default as (() => JSX.Element) | undefined;
 					if (!Hot) throw new Error(`No default export: ${path}`);

@@ -41,6 +41,16 @@ describe("mod urls", () => {
 		expect(url).toBe("/@apply-react/mod/pages/index.tsx");
 		expect(fromModUrlPath(root, url)).toBe(file);
 	});
+
+	test("encodes dynamic route brackets", () => {
+		const root = "/proj/src";
+		const file = "/proj/src/pages/products/[productid].tsx";
+		const url = toModUrl(root, file);
+		expect(url).toBe(
+			"/@apply-react/mod/pages/products/%5Bproductid%5D.tsx",
+		);
+		expect(fromModUrlPath(root, url)).toBe(file);
+	});
 });
 
 describe("transpileModFile", () => {
