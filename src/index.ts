@@ -124,6 +124,149 @@ export default function applyReactPluginToHTML(
 		},
 	};
 
+	/** Virtual modules that must be entrypoints so runtime can load them by URL. */
+	const virtualRuntimeEntrypoints = [
+		"@apply-react/client-routes.ts",
+		"@apply-react/client-hydrate.tsx",
+		"@apply-react/HMR.ts",
+		"@apply-react/HMR-enabled.ts",
+		"@apply-react/props.ts",
+		"@apply-react/client-shell.tsx",
+		"@apply-react/404.tsx",
+		"@apply-react/loading.tsx",
+	] as const;
+
+	const virtualFiles = (): Record<string, string> => ({
+		"@apply-react/client-routes.ts": perFileGraph
+			? `
+          				export default { ${Object.entries(fileRouter.routes)
+											.map(([pathname, fp]) => routeImportLine(pathname, fp))
+											.join(",\n")} };
+          			`
+			: `
+          			${Object.entries(getRoutes())
+								.map(
+									([_pathname, filePath], index) =>
+										`import _${index} from "${toRoutePath(filePath)}";`,
+								)
+								.join("\n")}
+          				export default { ${Object.entries(fileRouter.routes)
+									.map(([pathname, fp]) => routeImportLine(pathname, fp))
+									.join(",\n")} };
+          			`,
+		"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
+		"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
+		"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
+		// Always emitted as own entry so import "@apply-react/props.ts" resolves in build + runtime
+		"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};\nexport default HMR_ENABLED;\n`,
+		"@apply-react/props.ts": `const props = ${JSON.stringify(publicProps)};\nexport default props;\n`,
+		"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
+		"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
+		...(perFileGraph
+			? {}
+			: Object.assign(
+					{},
+					...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
+						[toRoutePath(fp)]: `export { default } from "${fp}";`,
+					})),
+				)),
+	});
+
+	const applyReactBuildPlugin = {
+		name: "apply-routes-to-hydrate",
+		setup(build: {
+			onLoad: (
+				opts: { filter: RegExp; namespace?: string },
+				cb: (args: {
+					path: string;
+					__chainedContents?: string;
+				}) =>
+					| { contents: string; loader?: string }
+					| undefined
+					| Promise<{ contents: string; loader?: string } | undefined>,
+			) => void;
+			onResolve: (
+				opts: { filter: RegExp },
+				cb: (args: { path: string }) =>
+					| { path: string; namespace?: string }
+					| undefined,
+			) => void;
+			finally: (
+				filter: string,
+				cb: (args: { contents: string }) => { contents: string },
+			) => void;
+		}) {
+			const files = virtualFiles();
+
+			// Ensure @apply-react/* virtuals resolve even when not yet pulled as deps
+			build.onResolve({ filter: /^@apply-react\// }, (args) => {
+				const key = args.path;
+				if (key in files || key.startsWith("@apply-react/routes/")) {
+					return { path: key, namespace: "apply-react-virtual" };
+				}
+				return undefined;
+			});
+
+			build.onLoad(
+				{ filter: /.*/, namespace: "apply-react-virtual" },
+				(args) => {
+					const contents = files[args.path];
+					if (contents == null) return undefined;
+					const loader = args.path.endsWith(".tsx")
+						? "tsx"
+						: args.path.endsWith(".ts")
+							? "ts"
+							: args.path.endsWith(".jsx")
+								? "jsx"
+								: "js";
+					return { contents, loader };
+				},
+			);
+
+			build.onLoad({ filter: /.*/ }, async (args) => {
+				if (await directiveManager.pathIs("server-only", args.path)) {
+					return { contents: "", loader: "js" };
+				}
+			});
+
+			const htmlrewriter = new HTMLRewriter()
+				.on("head", {
+					element(element) {
+						element.append(
+							`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
+							{ html: true },
+						);
+					},
+				})
+				.on("script#__hydrate_script__", {
+					element(element) {
+						element.remove();
+					},
+				});
+
+			build.onLoad({ filter: /\.html$/ }, async (args) => {
+				const contents =
+					args.__chainedContents ?? (await Bun.file(args.path).text());
+				return {
+					contents: htmlrewriter.transform(contents as string),
+				};
+			});
+			build.finally("html", ({ contents }) => ({
+				contents: htmlrewriter.transform(contents as string),
+			}));
+
+			if (!perFileGraph) {
+				build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
+					const realPath = join(
+						cwd,
+						args.path.replace("@apply-react/routes", route),
+					);
+					return { path: realPath };
+				});
+			}
+		},
+	};
+
 	if (debug) {
 		console.log(
 			`[Apply-React] moduleRoot=${moduleRootRel} perFileGraph=${perFileGraph}`,
@@ -138,75 +281,14 @@ export default function applyReactPluginToHTML(
 		},
 		build: {
 			buildConfig: () => {
+				const files = virtualFiles();
 				// Per-file graph: thin runtime entries only — pages load via /@apply-react/mod/*
 				if (perFileGraph) {
 					return {
-						entrypoints: [
-							...DevReactEntryPoints,
-							"@apply-react/client-routes.ts",
-							"@apply-react/client-hydrate.tsx",
-							"@apply-react/HMR.ts",
-							"@apply-react/client-shell.tsx",
-							"@apply-react/404.tsx",
-							"@apply-react/loading.tsx",
-						],
-						// Avoid shared app chunks; runtime stays small. Pages are unbundled mod URLs.
+						entrypoints: [...DevReactEntryPoints, ...virtualRuntimeEntrypoints],
 						splitting: false,
-						files: {
-							"@apply-react/client-routes.ts": `
-          				export default { ${Object.entries(fileRouter.routes)
-											.map(([pathname, fp]) => routeImportLine(pathname, fp))
-											.join(",\n")} };
-          			`,
-							"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
-							"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
-							"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
-							"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
-							"@apply-react/props.ts": `const props = ${JSON.stringify(publicProps)}; export default props;`,
-							"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
-							"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
-						},
-						plugins: [
-							{
-								name: "apply-routes-to-hydrate",
-								setup(build) {
-									build.onLoad({ filter: /.*/ }, async (args) => {
-										if (
-											await directiveManager.pathIs("server-only", args.path)
-										) {
-											return { contents: "", loader: "js" };
-										}
-									});
-
-									const htmlrewriter = new HTMLRewriter()
-										.on("head", {
-											element(element) {
-												element.append(
-													`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
-													{ html: true },
-												);
-											},
-										})
-										.on("script#__hydrate_script__", {
-											element(element) {
-												element.remove();
-											},
-										});
-
-									build.onLoad({ filter: /\.html$/ }, async (args) => {
-										const contents =
-											args.__chainedContents ??
-											(await Bun.file(args.path).text());
-										return {
-											contents: htmlrewriter.transform(contents as string),
-										};
-									});
-									build.finally("html", ({ contents }) => ({
-										contents: htmlrewriter.transform(contents as string),
-									}));
-								},
-							},
-						],
+						files,
+						plugins: [applyReactBuildPlugin],
 					};
 				}
 
@@ -214,87 +296,12 @@ export default function applyReactPluginToHTML(
 				return {
 					entrypoints: [
 						...(isProd() ? [] : DevReactEntryPoints),
-						"@apply-react/client-routes.ts",
-						"@apply-react/client-hydrate.tsx",
-						"@apply-react/HMR.ts",
-						"@apply-react/client-shell.tsx",
-						"@apply-react/404.tsx",
-						"@apply-react/loading.tsx",
+						...virtualRuntimeEntrypoints,
 						...createEntrypoints(getRoutes()),
 					],
 					splitting: true,
-					files: {
-						"@apply-react/client-routes.ts": `
-          			${Object.entries(getRoutes())
-									.map(
-										([_pathname, filePath], index) =>
-											`import _${index} from "${toRoutePath(filePath)}";`,
-									)
-									.join("\n")}
-          				export default { ${Object.entries(fileRouter.routes)
-										.map(([pathname, fp]) => routeImportLine(pathname, fp))
-										.join(",\n")} };
-          			`,
-						...Object.assign(
-							{},
-							...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
-								[toRoutePath(fp)]: `export { default } from "${fp}";`,
-							})),
-						),
-						"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
-						"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
-						"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
-						"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
-						"@apply-react/props.ts": `const props = ${JSON.stringify(publicProps)}; export default props;`,
-						"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
-						"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
-					},
-					plugins: [
-						{
-							name: "apply-routes-to-hydrate",
-							setup(build) {
-								build.onLoad({ filter: /.*/ }, async (args) => {
-									if (await directiveManager.pathIs("server-only", args.path)) {
-										return { contents: "", loader: "js" };
-									}
-								});
-
-								const htmlrewriter = new HTMLRewriter()
-									.on("head", {
-										element(element) {
-											element.append(
-												`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
-												{ html: true },
-											);
-										},
-									})
-									.on("script#__hydrate_script__", {
-										element(element) {
-											element.remove();
-										},
-									});
-
-								build.onLoad({ filter: /\.html$/ }, async (args) => {
-									const contents =
-										args.__chainedContents ??
-										(await Bun.file(args.path).text());
-									return {
-										contents: htmlrewriter.transform(contents as string),
-									};
-								});
-								build.finally("html", ({ contents }) => ({
-									contents: htmlrewriter.transform(contents as string),
-								}));
-								build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
-									const realPath = join(
-										cwd,
-										args.path.replace("@apply-react/routes", route),
-									);
-									return { path: realPath };
-								});
-							},
-						},
-					],
+					files,
+					plugins: [applyReactBuildPlugin],
 				};
 			},
 			afterBuild() {

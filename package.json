@@ -19,7 +19,8 @@
 		"./plugin": "./src/index.ts",
 		"./router": "./src/router.tsx",
 		"./types": "./src/types.d.ts",
-		"./utils": "./src/utils.ts"
+		"./utils": "./src/utils.ts",
+		"./props": "./@apply-react/props.ts"
 	},
 	"scripts": {
 		"dev": "NODE_ENV=development bun frame-master dev",
