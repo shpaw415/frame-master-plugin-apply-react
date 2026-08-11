@@ -7,6 +7,76 @@ export const REACT_BARE_TO_URL: Record<string, string> = {
 	"react/jsx-dev-runtime": "/react/jsx-dev-runtime.js",
 };
 
+/**
+ * Public vendor entrypoint paths (no leading slash) — must match REACT_BARE_TO_URL
+ * files under the build outdir (e.g. `react.js` → `/react.js`).
+ */
+export const REACT_VENDOR_ENTRYPOINTS = [
+	"react.js",
+	"react-dom.js",
+	"react-dom/client.js",
+	"react/jsx-runtime.js",
+	"react/jsx-dev-runtime.js",
+] as const;
+
+/** Bare package name for each vendor entrypoint path. */
+export const REACT_VENDOR_PACKAGE: Record<
+	(typeof REACT_VENDOR_ENTRYPOINTS)[number],
+	string
+> = {
+	"react.js": "react",
+	"react-dom.js": "react-dom",
+	"react-dom/client.js": "react-dom/client",
+	"react/jsx-runtime.js": "react/jsx-runtime",
+	"react/jsx-dev-runtime.js": "react/jsx-dev-runtime",
+};
+
+/**
+ * Resolve a package from project cwd, then from a fallback dir (plugin package).
+ */
+export function resolveReactPackage(
+	spec: string,
+	cwd: string,
+	fallbackDir?: string,
+): string {
+	try {
+		return Bun.resolveSync(spec, cwd);
+	} catch {
+		if (fallbackDir) {
+			try {
+				return Bun.resolveSync(spec, fallbackDir);
+			} catch {
+				// fall through
+			}
+		}
+		throw new Error(
+			`[Apply-React] cannot resolve "${spec}" from ${cwd}` +
+				(fallbackDir ? ` or ${fallbackDir}` : ""),
+		);
+	}
+}
+
+/**
+ * Virtual entry sources that re-export real react packages.
+ * Entrypoint keys are public paths (`react.js`) so Bun emits them at outdir root.
+ */
+export function buildReactVendorVirtualFiles(
+	cwd: string,
+	fallbackDir?: string,
+): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const entry of REACT_VENDOR_ENTRYPOINTS) {
+		const spec = REACT_VENDOR_PACKAGE[entry];
+		const resolved = resolveReactPackage(spec, cwd, fallbackDir);
+		// Re-export everything + default when present
+		out[entry] =
+			`export * from ${JSON.stringify(resolved)};\n` +
+			`import * as __m from ${JSON.stringify(resolved)};\n` +
+			`export default __m.default ?? __m;\n`;
+	}
+	return out;
+}
+
 /** Stable DOM id so injection is idempotent across build/runtime rewrites. */
 export const IMPORT_MAP_SCRIPT_ID = "__apply_react_importmap__";
 
@@ -28,10 +98,11 @@ const IMPORT_MAP_SCRIPT_RE =
 export function rewriteBareReactImportsToUrls(code: string): string {
 	if (!code.includes("react")) return code;
 
-	// from "react" / from 'react/jsx-dev-runtime' / import("react-dom/client")
+	// from "react" including multiline `import {\n  x\n} from "react"`
+	// and dynamic import("react-dom/client")
 	const fromOrDynamic = new RegExp(
-		`((?:import|export)\\s+[^'";\\n]*?\\sfrom\\s+|import\\s*\\(\\s*)(["'])(${REACT_BARE_SPECS})\\2`,
-		"g",
+		`((?:import|export)\\s+[^'";]*?\\sfrom\\s+|import\\s*\\(\\s*)(["'])(${REACT_BARE_SPECS})\\2`,
+		"gs",
 	);
 	let out = code.replace(
 		fromOrDynamic,

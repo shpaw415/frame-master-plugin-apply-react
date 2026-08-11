@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	buildReactVendorVirtualFiles,
 	ensureSingleImportMapInHtml,
 	htmlHasImportMap,
 	htmlHasOurImportMap,
@@ -7,6 +8,7 @@ import {
 	mergeImportMaps,
 	parseImportMapScripts,
 	REACT_BARE_TO_URL,
+	REACT_VENDOR_ENTRYPOINTS,
 	rewriteBareReactImportsToUrls,
 } from "../src/hmr/react-imports";
 
@@ -34,6 +36,13 @@ import { createElement } from "react-dom";
 		const src = `const m = await import("react/jsx-runtime");\n`;
 		const out = rewriteBareReactImportsToUrls(src);
 		expect(out).toContain('import("/react/jsx-runtime.js")');
+	});
+
+	test("rewrites multiline named import from react", () => {
+		const src = `import {\n  Component,\n  useState\n} from "react";\n`;
+		const out = rewriteBareReactImportsToUrls(src);
+		expect(out).toContain('} from "/react.js"');
+		expect(out).not.toContain('from "react"');
 	});
 
 	test("leaves unrelated imports alone", () => {
@@ -132,5 +141,15 @@ describe("mergeImportMaps", () => {
 		);
 		expect(m.foo).toBe("/foo2.js");
 		expect(m.react).toBe("/react.js");
+	});
+});
+
+describe("buildReactVendorVirtualFiles", () => {
+	test("emits all public vendor entry keys", () => {
+		const files = buildReactVendorVirtualFiles(process.cwd());
+		for (const key of REACT_VENDOR_ENTRYPOINTS) {
+			expect(files[key]).toBeTruthy();
+			expect(files[key]).toContain("export * from");
+		}
 	});
 });

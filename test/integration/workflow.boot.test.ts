@@ -172,6 +172,15 @@ describe("integration: apply-react boot + multi-entrypoint mod", () => {
 				);
 				expect(existsSync(artifact)).toBe(true);
 				expect(existsSync(ctxArtifact)).toBe(true);
+				// Browser vendor entrypoints required for /react.js imports
+				expect(
+					existsSync(join(dir, ".frame-master/build/react.js")),
+				).toBe(true);
+				expect(
+					existsSync(
+						join(dir, ".frame-master/build/react/jsx-dev-runtime.js"),
+					),
+				).toBe(true);
 
 				const base = env.baseUrl!;
 				const res = await nativeFetch(

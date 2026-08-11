@@ -17,7 +17,10 @@ import {
 	resolveModuleRoots,
 } from "./hmr/module-root";
 import {
+	buildReactVendorVirtualFiles,
 	ensureSingleImportMapInHtml,
+	REACT_BARE_TO_URL,
+	REACT_VENDOR_ENTRYPOINTS,
 	rewriteBareReactImportsToUrls,
 } from "./hmr/react-imports";
 import { createHmrServer } from "./hmr/server";
@@ -109,15 +112,24 @@ export default function applyReactPluginToHTML(
 		fileExtensions: entrypointExtensions,
 	});
 
-	const DevReactEntryPoints = isProd()
-		? []
-		: [
-				"react",
-				"react-dom",
-				"react-dom/client",
-				"react/jsx-dev-runtime",
-				"react/jsx-runtime",
-			];
+	/**
+	 * Stable browser vendor entrypoints (`react.js`, `react/jsx-dev-runtime.js`, …).
+	 * Virtual re-exports of real packages — guaranteed outdir paths for import map
+	 * and absolute `/react.js` imports (bare package entry names are unreliable).
+	 */
+	const reactVendorFiles = (): Record<string, string> => {
+		if (!perFileGraph && isProd()) return {};
+		try {
+			return buildReactVendorVirtualFiles(cwd, import.meta.dir);
+		} catch (err) {
+			console.error(
+				"[Apply-React] failed to resolve React vendor packages for browser entrypoints:",
+				err,
+			);
+			return {};
+		}
+	};
+
 	const routeDir = join(cwd, route);
 
 	const resolvedWatchDirs =
@@ -206,14 +218,17 @@ export default function applyReactPluginToHTML(
 		return files.map((fp) => toVirtualModEntry(moduleRoots, fp));
 	};
 
-	const virtualFiles = (): Record<string, string> => ({
-		"@apply-react/client-routes.ts": perFileGraph
-			? `
+	const virtualFiles = (): Record<string, string> => {
+		const vendor = perFileGraph ? reactVendorFiles() : {};
+		return {
+			...vendor,
+			"@apply-react/client-routes.ts": perFileGraph
+				? `
           				export default { ${Object.entries(fileRouter.routes)
 											.map(([pathname, fp]) => routeImportLine(pathname, fp))
 											.join(",\n")} };
           			`
-			: `
+				: `
           			${Object.entries(getRoutes())
 								.map(
 									([_pathname, filePath], index) =>
@@ -224,22 +239,23 @@ export default function applyReactPluginToHTML(
 									.map(([pathname, fp]) => routeImportLine(pathname, fp))
 									.join(",\n")} };
           			`,
-		"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
-		"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
-		"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
-		"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};\nexport default HMR_ENABLED;\n`,
-		"@apply-react/props.ts": `const props = ${JSON.stringify(publicProps)};\nexport default props;\n`,
-		"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
-		"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
-		...(perFileGraph
-			? {}
-			: Object.assign(
-					{},
-					...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
-						[toRoutePath(fp)]: `export { default } from "${fp}";`,
-					})),
-				)),
-	});
+			"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
+			"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
+			"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
+			"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};\nexport default HMR_ENABLED;\n`,
+			"@apply-react/props.ts": `const props = ${JSON.stringify(publicProps)};\nexport default props;\n`,
+			"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
+			"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
+			...(perFileGraph
+				? {}
+				: Object.assign(
+						{},
+						...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
+							[toRoutePath(fp)]: `export { default } from "${fp}";`,
+						})),
+					)),
+		};
+	};
 
 	const applyReactBuildPlugin = {
 		name: "apply-routes-to-hydrate",
@@ -272,12 +288,38 @@ export default function applyReactPluginToHTML(
 			) => void;
 		}) {
 			const files = virtualFiles();
+			const vendorEntrySet = new Set(
+				REACT_VENDOR_ENTRYPOINTS.filter((k) => k in files),
+			);
 
 			// Browser-only per-file module URLs — never bundle at build time
 			build.onResolve({ filter: /^\/@apply-react\/mod\// }, (args) => ({
 				path: args.path,
 				external: true,
 			}));
+
+			// Absolute /react.js etc. (after rewrite or import map targets)
+			build.onResolve({ filter: /^\/react(-dom)?(\/|\.js$)/ }, (args) => ({
+				path: args.path,
+				external: true,
+			}));
+
+			// Virtual vendor entrypoints (`react.js`, …) → apply-react-virtual namespace
+			if (vendorEntrySet.size > 0) {
+				build.onResolve(
+					{
+						filter:
+							/^(react\.js|react-dom\.js|react-dom\/client\.js|react\/jsx-runtime\.js|react\/jsx-dev-runtime\.js)$/,
+					},
+					(args) => {
+						const key = args.path.split("?")[0] ?? args.path;
+						if (vendorEntrySet.has(key as (typeof REACT_VENDOR_ENTRYPOINTS)[number])) {
+							return { path: key, namespace: "apply-react-virtual" };
+						}
+						return undefined;
+					},
+				);
+			}
 
 			// Virtual entry keys `@apply-react/mod/<rel>` → real source under moduleRoot(s)
 			if (perFileGraph) {
@@ -293,14 +335,21 @@ export default function applyReactPluginToHTML(
 					return { path: file };
 				});
 
-				// Bare react/* from app modules stay external (import map resolves in browser)
+				// Bare react/* → external (afterBuild rewrites to /react.js).
+				// Vendor shims import absolute package paths, not bare names.
 				build.onResolve({ filter: REACT_BARE_IMPORT_RE }, (args) => {
 					if (!args.importer) return undefined;
-					const importer = args.importer.split("?")[0] ?? args.importer;
-					if (isUnderModuleRoots(moduleRoots, importer)) {
-						return { path: args.path, external: true };
+					const importer = (
+						args.importer.split("?")[0] ?? args.importer
+					).replace(/\\/g, "/");
+					if (
+						vendorEntrySet.has(
+							importer as (typeof REACT_VENDOR_ENTRYPOINTS)[number],
+						)
+					) {
+						return undefined;
 					}
-					return undefined;
+					return { path: args.path, external: true };
 				});
 			}
 
@@ -461,16 +510,17 @@ export default function applyReactPluginToHTML(
 		build: {
 			buildConfig: () => {
 				const files = virtualFiles();
+				const vendorEntries = REACT_VENDOR_ENTRYPOINTS.filter((k) => k in files);
 				if (perFileGraph) {
 					const modEntries = collectModEntrypoints();
 					if (debug) {
 						console.log(
-							`[Apply-React] per-file entrypoints: runtime=${virtualRuntimeEntrypoints.length} mod=${modEntries.length}`,
+							`[Apply-React] per-file entrypoints: vendor=${vendorEntries.length} runtime=${virtualRuntimeEntrypoints.length} mod=${modEntries.length}`,
 						);
 					}
 					return {
 						entrypoints: [
-							...DevReactEntryPoints,
+							...vendorEntries,
 							...virtualRuntimeEntrypoints,
 							...modEntries,
 						],
@@ -482,7 +532,6 @@ export default function applyReactPluginToHTML(
 
 				return {
 					entrypoints: [
-						...(isProd() ? [] : DevReactEntryPoints),
 						...virtualRuntimeEntrypoints,
 						...createEntrypoints(getRoutes()),
 					],
@@ -492,32 +541,100 @@ export default function applyReactPluginToHTML(
 				};
 			},
 			async afterBuild(_config, result) {
-				// Bun keeps bare "react/…" when external — browsers need absolute URLs
-				// (import maps are best-effort; absolute paths always work).
+				// Bun keeps bare "react/…" when external — browsers need absolute URLs.
 				if (perFileGraph && result?.outputs?.length) {
 					await Promise.all(
-						result.outputs.map(
-							async (out: { path: string }) => {
-								if (!out.path.endsWith(".js")) return;
-								try {
-									const text = await Bun.file(out.path).text();
-									if (!text.includes("from ") && !text.includes("import "))
-										return;
-									const next = rewriteBareReactImportsToUrls(text);
-									if (next !== text) {
-										await Bun.write(out.path, next);
-										if (debug) {
-											console.log(
-												`[Apply-React] rewrote bare react imports in ${out.path}`,
-											);
-										}
+						result.outputs.map(async (out: { path: string }) => {
+							if (!out.path.endsWith(".js")) return;
+							try {
+								const text = await Bun.file(out.path).text();
+								if (!text.includes("from ") && !text.includes("import "))
+									return;
+								const next = rewriteBareReactImportsToUrls(text);
+								if (next !== text) {
+									await Bun.write(out.path, next);
+									if (debug) {
+										console.log(
+											`[Apply-React] rewrote bare react imports in ${out.path}`,
+										);
 									}
-								} catch {
-									// ignore missing/deleted artifacts
 								}
-							},
-						),
+							} catch {
+								// ignore missing/deleted artifacts
+							}
+						}),
 					);
+
+					// Failsafe: ensure vendor files exist at outdir root (/react.js, …)
+					const outDir = liveOutDir;
+					const stillMissing: string[] = [];
+					for (const rel of REACT_VENDOR_ENTRYPOINTS) {
+						if (!(await Bun.file(join(outDir, rel)).exists())) {
+							stillMissing.push(rel);
+						}
+					}
+					if (stillMissing.length > 0) {
+						console.warn(
+							`[Apply-React] missing React vendor outputs: ${stillMissing.join(", ")} — running fallback vendor build`,
+						);
+						try {
+							const vendorFiles = reactVendorFiles();
+							const entries = stillMissing.filter((k) => k in vendorFiles);
+							if (entries.length > 0) {
+								const fb = await Bun.build({
+									entrypoints: entries,
+									outdir: outDir,
+									target: "browser",
+									format: "esm",
+									splitting: false,
+									plugins: [
+										{
+											name: "apply-react-vendor-fallback",
+											setup(b) {
+												b.onResolve(
+													{
+														filter:
+															/^(react\.js|react-dom\.js|react-dom\/client\.js|react\/jsx-runtime\.js|react\/jsx-dev-runtime\.js)$/,
+													},
+													(args) => {
+														if (args.path in vendorFiles) {
+															return {
+																path: args.path,
+																namespace: "apply-react-vendor-fb",
+															};
+														}
+													},
+												);
+												b.onLoad(
+													{
+														filter: /.*/,
+														namespace: "apply-react-vendor-fb",
+													},
+													(args) => ({
+														contents: vendorFiles[args.path] ?? "",
+														loader: "js",
+													}),
+												);
+											},
+										},
+									],
+								});
+								if (!fb.success) {
+									console.error(
+										"[Apply-React] fallback vendor build failed",
+										fb.logs,
+									);
+								} else if (debug) {
+									console.log(
+										"[Apply-React] fallback vendor outputs:",
+										fb.outputs.map((o) => o.path),
+									);
+								}
+							}
+						} catch (e) {
+							console.error("[Apply-React] fallback vendor build error", e);
+						}
+					}
 				}
 				hmr.handleAfterBuild();
 			},
