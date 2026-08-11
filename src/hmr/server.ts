@@ -38,7 +38,10 @@ export type CreateHmrServerOptions = {
 	debug?: boolean;
 	/** Absolute module root for per-file graph */
 	moduleRootAbs?: string;
-	/** When true, FS changes under moduleRoot emit invalidate-module (no full route bundle) */
+	/**
+	 * When true, FS changes under moduleRoot rebuild the multi-entrypoint graph
+	 * then emit invalidate-module (cache-bust built artifacts).
+	 */
 	perFileGraph?: boolean;
 };
 
@@ -48,6 +51,8 @@ export type HmrServer = {
 	clearSelectiveRoute: () => void;
 	getRoutesForBuild: () => Record<string, string>;
 	requestDevRouteBuild: (pathname: string) => Promise<DevRouteBuildResponse>;
+	/** Kick a full per-file graph rebuild (e.g. missing mod artifact). */
+	requestModGraphRebuild: (reason?: string) => void;
 	onFileSystemChange: (absolutePath: string) => void;
 	handleAfterBuild: () => void;
 	onSocketOpen: (ws: Bun.ServerWebSocket<unknown>) => void;
@@ -94,6 +99,13 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	 * Key = route name (`/layout`), value = built js path relative to routes dir.
 	 */
 	const pendingShellNotifies = new Map<string, string>();
+	/**
+	 * Per-file graph: moduleRoot-relative paths to invalidate after a successful rebuild.
+	 * Empty set + rebuildRequested → rebuild without client invalidate (e.g. missing artifact).
+	 */
+	const pendingModuleInvalidations = new Set<string>();
+	let modGraphRebuildPromise: Promise<void> | null = null;
+	let modGraphRebuildQueued = false;
 
 	const log = (...args: unknown[]) => {
 		if (debug || process.env.DEBUG_APPLY_REACT === "1") {
@@ -437,11 +449,122 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		}, debounceMs);
 	};
 
+	const flushModuleInvalidations = (success: boolean) => {
+		if (!success) {
+			pendingModuleInvalidations.clear();
+			return;
+		}
+		if (pendingModuleInvalidations.size === 0) return;
+		const paths = [...pendingModuleInvalidations];
+		pendingModuleInvalidations.clear();
+		const t = Date.now();
+		const gen = nextGeneration();
+		for (const rel of paths) {
+			log("invalidate-module after rebuild", rel);
+			broadcast(
+				envelope(
+					{
+						type: "invalidate-module",
+						path: rel,
+						t,
+					},
+					gen,
+				),
+			);
+		}
+	};
+
+	const runModGraphRebuild = async () => {
+		const builder = liveBuilder;
+		if (!builder) {
+			pendingModuleInvalidations.clear();
+			modGraphRebuildQueued = false;
+			return;
+		}
+		if (modGraphRebuildPromise) {
+			modGraphRebuildQueued = true;
+			return modGraphRebuildPromise;
+		}
+
+		modGraphRebuildPromise = (async () => {
+			do {
+				modGraphRebuildQueued = false;
+				const activeBuild = builder.awaitBuildFinish();
+				if (builder.isBuilding() && activeBuild) {
+					await activeBuild;
+				}
+				const gen = nextGeneration();
+				broadcast(
+					envelope(
+						{
+							type: "route-build-started",
+							pathname: "/",
+							routeName: "/@apply-react/mod",
+						},
+						gen,
+					),
+				);
+				let success = true;
+				try {
+					log("per-file graph rebuild", {
+						pendingInvalidations: pendingModuleInvalidations.size,
+					});
+					const result = await builder.build();
+					if (result && "success" in result && result.success === false) {
+						success = false;
+						const msg =
+							// @ts-expect-error bun build logs shape varies
+							result.logs?.[0]?.message ?? "Build failed";
+						broadcast(
+							envelope(
+								{
+									type: "build-failed",
+									pathname: "/",
+									routeName: "/@apply-react/mod",
+									error: { message: String(msg) },
+								},
+								gen,
+							),
+						);
+					}
+				} catch (error) {
+					success = false;
+					broadcast(
+						envelope(
+							{
+								type: "build-failed",
+								pathname: "/",
+								routeName: "/@apply-react/mod",
+								error: errorToPayload(error),
+							},
+							gen,
+						),
+					);
+				} finally {
+					ignoreFsUntil = Date.now() + Math.max(debounceMs * 4, 400);
+				}
+				// afterBuild hook also runs via plugin; flush invalidations here so
+				// we still notify even if afterBuild path differs.
+				flushModuleInvalidations(success);
+			} while (modGraphRebuildQueued);
+		})().finally(() => {
+			modGraphRebuildPromise = null;
+		});
+
+		return modGraphRebuildPromise;
+	};
+
+	const requestModGraphRebuild = (reason?: string) => {
+		if (!perFileGraph) return;
+		log("requestModGraphRebuild", reason ?? "");
+		void runModGraphRebuild();
+	};
+
 	const classifyAndHandle = (absolutePath: string) => {
 		if (shouldIgnoreWatchPath(cwd, absolutePath)) return;
 		log("file change", absolutePath);
 
-		// Per-file graph: notify client to re-import only this stable module URL
+		// Per-file graph: rebuild entrypoints, then invalidate changed module URLs
 		if (
 			perFileGraph &&
 			moduleRootAbs &&
@@ -469,17 +592,8 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 				"/",
 			);
 			if (!rel || rel.startsWith("..")) return;
-			const gen = nextGeneration();
-			broadcast(
-				envelope(
-					{
-						type: "invalidate-module",
-						path: rel,
-						t: Date.now(),
-					},
-					gen,
-				),
-			);
+			pendingModuleInvalidations.add(rel);
+			void runModGraphRebuild();
 			return;
 		}
 
@@ -578,6 +692,11 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 	const handleAfterBuild = () => {
 		// Build may write under .frame-master — ignore those FS events briefly
 		ignoreFsUntil = Date.now() + Math.max(debounceMs * 4, 400);
+		// Per-file: invalidations are flushed inside runModGraphRebuild after success.
+		// If a full build completed outside that path with pending paths, flush here.
+		if (perFileGraph && pendingModuleInvalidations.size > 0 && !modGraphRebuildPromise) {
+			flushModuleInvalidations(true);
+		}
 		if (pendingRouteUpdate) {
 			const target = pendingRouteUpdate;
 			pendingRouteUpdate = null;
@@ -621,6 +740,7 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		},
 		getRoutesForBuild,
 		requestDevRouteBuild,
+		requestModGraphRebuild,
 		onFileSystemChange,
 		handleAfterBuild,
 		onSocketOpen(ws) {

@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { resolveModuleRoot } from "../src/hmr/module-root";
 import {
 	fromModUrlPath,
+	listModuleFiles,
+	resolveBuiltModPath,
 	resolveModFile,
+	rewriteRelativeImportsToModUrls,
 	toModUrl,
-	transpileModFile,
+	toVirtualModEntry,
 } from "../src/hmr/mod-server";
 
 describe("resolveModuleRoot", () => {
@@ -40,7 +43,6 @@ describe("mod urls", () => {
 		const file = "/proj/app/pages/index.tsx";
 		const url = toModUrl(root, file);
 		expect(url).toBe("/@apply-react/mod/pages/index.js");
-		// fromModUrlPath returns the .js path; resolveModFile maps to source
 		expect(fromModUrlPath(root, url)).toBe("/proj/app/pages/index.js");
 	});
 
@@ -52,32 +54,62 @@ describe("mod urls", () => {
 			"/@apply-react/mod/pages/products/%5Bproductid%5D.js",
 		);
 	});
+
+	test("virtual entry key preserves source extension and relative path", () => {
+		const root = "/proj/src";
+		const file = "/proj/src/pages/products/[productid].tsx";
+		expect(toVirtualModEntry(root, file)).toBe(
+			"@apply-react/mod/pages/products/[productid].tsx",
+		);
+	});
+
+	test("resolveBuiltModPath decodes brackets under outdir", () => {
+		const built = resolveBuiltModPath(
+			"/proj/.frame-master/build",
+			"/@apply-react/mod/pages/products/%5Bproductid%5D.js",
+		);
+		expect(built).toBe(
+			"/proj/.frame-master/build/@apply-react/mod/pages/products/[productid].js",
+		);
+	});
 });
 
-describe("transpileModFile", () => {
-	test("externalizes relative imports to stable .js mod urls", async () => {
+describe("rewriteRelativeImportsToModUrls", () => {
+	test("externalizes relative imports to stable .js mod urls", () => {
 		const dir = mkdtempSync(join(tmpdir(), "ar-tp-"));
 		try {
 			mkdirSync(join(dir, "pages"), { recursive: true });
-			writeFileSync(
-				join(dir, "ctx.ts"),
-				`export const Ctx = "ok";\n`,
+			writeFileSync(join(dir, "ctx.ts"), `export const Ctx = "ok";\n`);
+			const page = join(dir, "pages/index.tsx");
+			const source = `import { Ctx } from "../ctx";\nexport default function P() { return <div>{Ctx}</div>; }\n`;
+			writeFileSync(page, source);
+			const out = rewriteRelativeImportsToModUrls(source, page, dir);
+			expect(out).toContain("/@apply-react/mod/ctx.js");
+			expect(out).not.toContain('from "../ctx"');
+			expect(out).not.toContain("ctx.ts");
+			expect(resolveModFile(dir, "/@apply-react/mod/pages/index.js")).toBe(
+				page,
 			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("listModuleFiles", () => {
+	test("all mode lists every source under root", () => {
+		const dir = mkdtempSync(join(tmpdir(), "ar-list-"));
+		try {
+			mkdirSync(join(dir, "pages"), { recursive: true });
+			writeFileSync(join(dir, "ctx.ts"), "export const x = 1;\n");
 			writeFileSync(
 				join(dir, "pages/index.tsx"),
-				`import { Ctx } from "../ctx";\nexport default function P() { return <div>{Ctx}</div>; }\n`,
+				"export default function P(){return null}\n",
 			);
-			const out = await transpileModFile(join(dir, "pages/index.tsx"), dir);
-			expect("code" in out).toBe(true);
-			if ("code" in out) {
-				expect(out.code).toContain("/@apply-react/mod/ctx.js");
-				expect(out.code).not.toContain('from "../ctx"');
-				expect(out.code).not.toContain("ctx.ts");
-			}
-			// .js URL resolves back to source .tsx
-			expect(
-				resolveModFile(dir, "/@apply-react/mod/pages/index.js"),
-			).toBe(join(dir, "pages/index.tsx"));
+			const files = listModuleFiles(dir, "all");
+			expect(files.sort()).toEqual(
+				[join(dir, "ctx.ts"), join(dir, "pages/index.tsx")].sort(),
+			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

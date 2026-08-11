@@ -11,14 +11,16 @@ export type ApplyReactHmrOptions = {
 	overlay?: boolean;
 	/**
 	 * Dev module graph strategy.
-	 * - `per-file` (default when HMR on): stable `/@apply-react/mod/*` URLs, no shared app chunks
+	 * - `per-file` (default when HMR on): each `moduleRoot` file is a real build
+	 *   entrypoint → path-stable `/@apply-react/mod/*.js` artifacts (plugin pipeline
+	 *   applies). HMR rebuilds then cache-busts with `?t=`.
 	 * - `bundled`: legacy selective route bundles with splitting
 	 */
 	moduleGraph?: "bundled" | "per-file";
 	/**
-	 * Which files under `moduleRoot` participate in discovery (build seeds / docs).
-	 * - `reachable` (default): from routes + shell
-	 * - `all`: every source file under moduleRoot
+	 * Which files under `moduleRoot` become build entrypoints (per-file mode).
+	 * - `all` (default): every source file under moduleRoot
+	 * - `reachable`: only modules reachable from routes + shell + fallbacks
 	 */
 	entrypointMode?: "reachable" | "all";
 	/**

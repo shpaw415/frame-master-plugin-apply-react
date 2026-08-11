@@ -22,6 +22,8 @@ const RESOLVE_EXTENSIONS = [
 	".json",
 ];
 
+const SOURCE_EXT_RE = /\.(tsx|ts|jsx|js|mjs|cjs|mts|cts)$/i;
+
 export function isAppSourceFile(filePath: string): boolean {
 	return APP_EXTENSIONS.has(extname(filePath));
 }
@@ -113,9 +115,7 @@ function resolveSpecifier(
 	return null;
 }
 
-const SOURCE_EXT_RE = /\.(tsx|ts|jsx|js|mjs|cjs|mts|cts)$/i;
-
-/** Public module URLs always use `.js` (transpiled), never source `.tsx`. */
+/** Public module URLs always use `.js` (built), never source `.tsx`. */
 export function toPublicModRelPath(rel: string): string {
 	const normalized = rel.replace(/\\/g, "/");
 	const asJs = normalized.replace(SOURCE_EXT_RE, ".js");
@@ -140,16 +140,26 @@ export function toModUrl(moduleRootAbs: string, absoluteFile: string): string {
 	return `/@apply-react/mod/${encodeModRelPath(rel)}`;
 }
 
-/** Decode `/@apply-react/mod/...` pathname to a moduleRoot-relative path (may end in `.js`). */
-export function fromModUrlPath(
+/**
+ * Virtual Bun entrypoint key for a source file under moduleRoot.
+ * Build emits path-stable `@apply-react/mod/<rel>.js` from this key.
+ */
+export function toVirtualModEntry(
 	moduleRootAbs: string,
-	urlPathname: string,
-): string | null {
-	const prefix = "/@apply-react/mod/";
-	if (!urlPathname.startsWith(prefix)) return null;
-	// Decode each segment (handles [id] → %5Bid%5D and plain paths)
-	const rel = urlPathname
-		.slice(prefix.length)
+	absoluteFile: string,
+): string {
+	const rel = relative(moduleRootAbs, absoluteFile).replace(/\\/g, "/");
+	if (!rel || rel.startsWith("..")) {
+		throw new Error(
+			`[Apply-React] file outside moduleRoot: ${absoluteFile} (root=${moduleRootAbs})`,
+		);
+	}
+	return `@apply-react/mod/${rel}`;
+}
+
+/** Decode a virtual entry key or public mod URL path to moduleRoot-relative form. */
+export function decodeModRelSegments(encodedRel: string): string {
+	return encodedRel
 		.split("/")
 		.map((seg) => {
 			try {
@@ -159,6 +169,16 @@ export function fromModUrlPath(
 			}
 		})
 		.join("/");
+}
+
+/** Decode `/@apply-react/mod/...` pathname to an absolute path under moduleRoot (may end in `.js`). */
+export function fromModUrlPath(
+	moduleRootAbs: string,
+	urlPathname: string,
+): string | null {
+	const prefix = "/@apply-react/mod/";
+	if (!urlPathname.startsWith(prefix)) return null;
+	const rel = decodeModRelSegments(urlPathname.slice(prefix.length));
 	if (!rel || rel.includes("..")) return null;
 	const abs = resolve(moduleRootAbs, rel);
 	if (!abs.startsWith(moduleRootAbs)) return null;
@@ -175,16 +195,13 @@ export function resolveModFile(
 	const abs = fromModUrlPath(moduleRootAbs, urlPathname);
 	if (!abs) return null;
 
-	// Prefer exact source file if URL still has a source extension
 	if (existsSync(abs) && isAppSourceFile(abs)) return abs;
 
-	// Public URLs use .js — strip and probe real source extensions
 	const withoutJs = abs.replace(/\.js$/i, "");
 	const candidates = [
 		withoutJs,
 		...RESOLVE_EXTENSIONS.map((e) => withoutJs + e),
 		...RESOLVE_EXTENSIONS.map((e) => join(withoutJs, `index${e}`)),
-		// also try with .js left on (plain JS source)
 		abs,
 		...RESOLVE_EXTENSIONS.map((e) => abs + e),
 	];
@@ -196,12 +213,22 @@ export function resolveModFile(
 	return null;
 }
 
-function loaderFor(file: string): "ts" | "tsx" | "js" | "jsx" {
-	const e = extname(file);
-	if (e === ".tsx") return "tsx";
-	if (e === ".ts" || e === ".mts" || e === ".cts") return "ts";
-	if (e === ".jsx") return "jsx";
-	return "js";
+/**
+ * Absolute path of the built artifact for a public `/@apply-react/mod/...` URL.
+ * Decodes `%5B` so disk can keep `[id].js` while the URL is encoded.
+ */
+export function resolveBuiltModPath(
+	buildOutDir: string,
+	urlPathname: string,
+): string | null {
+	const prefix = "/@apply-react/mod/";
+	if (!urlPathname.startsWith(prefix)) return null;
+	const rel = decodeModRelSegments(urlPathname.slice(prefix.length));
+	if (!rel || rel.includes("..")) return null;
+	const outAbs = resolve(buildOutDir);
+	const built = resolve(outAbs, "@apply-react", "mod", rel);
+	if (!built.startsWith(join(outAbs, "@apply-react", "mod"))) return null;
+	return built;
 }
 
 /**
@@ -224,78 +251,74 @@ export function rewriteRelativeImportsToModUrls(
 	);
 }
 
+export type HandleBuiltModOptions = {
+	moduleRootAbs: string;
+	/** Absolute or cwd-relative build outdir */
+	getBuildOutDir: () => string;
+	/** Kick a rebuild when the artifact is missing (debounced by caller). */
+	onMissingArtifact?: (urlPathname: string) => void;
+};
+
 /**
- * Transpile a single app file to ESM with stable external mod URLs for locals.
+ * Serve a built per-file module from the Frame-Master outdir.
+ * Never live-transpiles — missing artifacts 404 and optionally trigger rebuild.
  */
-export async function transpileModFile(
-	absoluteFile: string,
-	moduleRootAbs: string,
-): Promise<{ code: string; contentType: string } | { error: string }> {
-	if (!existsSync(absoluteFile)) {
-		return { error: `File not found: ${absoluteFile}` };
+export async function handleBuiltModRequest(
+	req: Request,
+	options: HandleBuiltModOptions,
+): Promise<Response> {
+	const url = new URL(req.url);
+	const outDir = options.getBuildOutDir();
+	const built = resolveBuiltModPath(outDir, url.pathname);
+
+	if (!built) {
+		return new Response(`Invalid mod path: ${url.pathname}`, { status: 400 });
 	}
 
-	try {
-		const source = readFileSync(absoluteFile, "utf8");
-		const rewritten = rewriteRelativeImportsToModUrls(
-			source,
-			absoluteFile,
-			moduleRootAbs,
-		);
-		const loader = loaderFor(absoluteFile);
-		const transpiler = new Bun.Transpiler({
-			loader,
-			tsconfig: {
-				compilerOptions: {
-					jsx: "react-jsx",
-					jsxImportSource: "react",
-				},
+	if (existsSync(built)) {
+		const file = Bun.file(built);
+		return new Response(file, {
+			status: 200,
+			headers: {
+				"content-type": "application/javascript; charset=utf-8",
+				"cache-control": url.searchParams.has("t") ? "no-store" : "no-cache",
 			},
 		});
-		let code = transpiler.transformSync(rewritten);
-
-		// Ensure jsx runtime import if transform injected jsx calls without import
-		if (
-			/\bjsxDEV\b|\bjsx\b|\bjsxs\b/.test(code) &&
-			!/from\s+["']react\/jsx-/.test(code)
-		) {
-			code = `import { jsx as _jsx, jsxs as _jsxs, jsxDEV as _jsxDEV, Fragment as _Fragment } from "react/jsx-dev-runtime";\n${code}`;
-			// Bun may emit jsxDEV_xxx identifiers — map common patterns
-			code = code
-				.replace(/\bjsxDEV_\w+/g, "_jsxDEV")
-				.replace(/\bjsx_\w+/g, "_jsx")
-				.replace(/\bjsxs_\w+/g, "_jsxs");
-		}
-
-		return { code, contentType: "application/javascript; charset=utf-8" };
-	} catch (e) {
-		return { error: e instanceof Error ? e.message : String(e) };
 	}
+
+	// Also try source resolve for clearer error (and rebuild kick)
+	const source = resolveModFile(options.moduleRootAbs, url.pathname);
+	options.onMissingArtifact?.(url.pathname);
+
+	const hint = source
+		? `source exists at ${source}; not in last build`
+		: "no matching source under moduleRoot";
+
+	return new Response(
+		`module not in last build: ${url.pathname} (${hint})`,
+		{
+			status: 404,
+			headers: { "content-type": "text/plain; charset=utf-8" },
+		},
+	);
 }
 
+/** @deprecated Use handleBuiltModRequest — kept for external re-exports during transition */
 export async function handleModRequest(
 	req: Request,
 	moduleRootAbs: string,
+	getBuildOutDir?: () => string,
+	onMissingArtifact?: (urlPathname: string) => void,
 ): Promise<Response> {
-	const url = new URL(req.url);
-	const file = resolveModFile(moduleRootAbs, url.pathname);
-	if (!file) {
-		return new Response(`Not found: ${url.pathname}`, { status: 404 });
+	if (!getBuildOutDir) {
+		return new Response(
+			"per-file modules require a build outdir (handleBuiltModRequest)",
+			{ status: 500 },
+		);
 	}
-
-	const out = await transpileModFile(file, moduleRootAbs);
-	if ("error" in out) {
-		return new Response(out.error, {
-			status: 500,
-			headers: { "content-type": "text/plain; charset=utf-8" },
-		});
-	}
-
-	return new Response(out.code, {
-		status: 200,
-		headers: {
-			"content-type": out.contentType,
-			"cache-control": url.searchParams.has("t") ? "no-store" : "no-cache",
-		},
+	return handleBuiltModRequest(req, {
+		moduleRootAbs,
+		getBuildOutDir,
+		onMissingArtifact,
 	});
 }

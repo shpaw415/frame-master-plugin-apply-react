@@ -116,8 +116,27 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 | `hydration`               | `"hydrate" \| "render"` | `"hydrate"` | `hydrate` attaches to SSG HTML; `render` uses `createRoot` |
 | `watchDirectories`        | `string[]?` | `[moduleRoot]` in per-file HMR | Directories watched for HMR file changes |
 | `watchDirectoriesExclude` | `string[]?` | -           | Directories excluded from HMR watching                                 |
-| `hmr`                     | `object?`   | -           | `moduleGraph` (`per-file`\|`bundled`), `preserveState`, debounce, overlay |
+| `hmr`                     | `object?`   | -           | See HMR options below |
 | `debug`                   | `boolean?`  | `false`     | Verbose Apply-React logs (`DEBUG_APPLY_REACT=1`)                        |
+
+### HMR / per-file module graph
+
+When HMR is on (dev), `hmr.moduleGraph` defaults to **`per-file`**:
+
+- Every source file under `moduleRoot` is a **real Bun build entrypoint** (default `hmr.entrypointMode: "all"`; use `"reachable"` to limit to the route/shell graph).
+- Outputs are path-stable: `.frame-master/build/@apply-react/mod/<rel>.js` (served at `/@apply-react/mod/...`).
+- Other Frame-Master plugins’ `onLoad` transforms run on those real source paths.
+- Cross-module imports are rewritten to stable public `/@apply-react/mod/*.js` URLs (no shared hashed app chunks).
+- On file change: **rebuild →** WebSocket `invalidate-module` → client cache-bust with `?t=` (no live transpile).
+- Missing artifacts return **404** and kick a rebuild (never on-the-fly transpile).
+
+| `hmr` field | Default | Description |
+| --- | --- | --- |
+| `moduleGraph` | `per-file` (dev) | `per-file` multi-entrypoint graph, or `bundled` legacy route bundles |
+| `entrypointMode` | `all` | `all` files under `moduleRoot`, or `reachable` from routes + shell |
+| `preserveState` | `true` | Prefer soft page swaps without remounting ErrorWrapper |
+| `debounceMs` | `75` | FS change debounce before rebuild |
+| `overlay` | `true` | Client error overlay |
 
 ### Dev HMR: per-file modules (default)
 

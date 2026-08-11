@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
 import {
 	createPluginTestEnv,
 	type PluginTestEnv,
@@ -14,6 +16,16 @@ const NativeWebSocket =
 		}
 	).__APPLY_REACT_NATIVE_WEBSOCKET__ ?? WebSocket;
 
+const REPO_ROOT = join(import.meta.dir, "../..");
+
+function linkRepoNodeModules(dir: string) {
+	const target = join(REPO_ROOT, "node_modules");
+	const link = join(dir, "node_modules");
+	if (!existsSync(link) && existsSync(target)) {
+		symlinkSync(target, link, "dir");
+	}
+}
+
 describe("integration: HMR websocket", () => {
 	let env: PluginTestEnv | undefined;
 
@@ -24,6 +36,7 @@ describe("integration: HMR websocket", () => {
 
 	test("ws connects and receives server-hello", async () => {
 		await withTempDir(async (dir) => {
+			linkRepoNodeModules(dir);
 			await writeFixture(
 				dir,
 				"src/pages/index.tsx",
