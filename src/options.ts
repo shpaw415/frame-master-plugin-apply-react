@@ -24,6 +24,15 @@ export type ApplyReactHmrOptions = {
 	 */
 	entrypointMode?: "reachable" | "all";
 	/**
+	 * Regex filters (or string patterns compiled as RegExp) — matching modules are
+	 * **not** build entrypoints. Tested against absolute path, cwd-relative path,
+	 * and the public mod relative path (e.g. `pages/foo.tsx`).
+	 *
+	 * @example
+	 * entrypointExclude: [/\.test\.[tj]sx?$/, String.raw`/(stories|mocks)/`]
+	 */
+	entrypointExclude?: Array<string | RegExp>;
+	/**
 	 * Prefer soft page swaps without remounting ErrorWrapper (default true).
 	 */
 	preserveState?: boolean;
@@ -37,10 +46,15 @@ export type ApplyReactPluginOptions = {
 	route: string;
 
 	/**
-	 * Root directory for stable per-file modules (customizable — not fixed to "src").
+	 * Root directory (or directories) for stable per-file modules.
+	 * Customizable — not fixed to `"src"`. Pass a string or an array of paths.
 	 * Inferred from `route` when omitted (parent of `…/pages`, else `src` if present).
+	 *
+	 * @example
+	 * moduleRoot: "src"
+	 * moduleRoot: ["src", "packages/ui"]
 	 */
-	moduleRoot?: string;
+	moduleRoot?: string | string[];
 
 	/**
 	 * Optional path to a custom client-side shell component

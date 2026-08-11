@@ -1,5 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
+import {
+	type ModuleRootEntry,
+	compileEntrypointExclude,
+	findContainingRoot,
+	matchesEntrypointExclude,
+	toModPublicRel,
+} from "./module-root";
 
 const APP_EXTENSIONS = new Set([
 	".ts",
@@ -28,36 +35,95 @@ export function isAppSourceFile(filePath: string): boolean {
 	return APP_EXTENSIONS.has(extname(filePath));
 }
 
+export type ListModuleFilesOptions = {
+	/** Project cwd for exclude matching / relative paths */
+	cwd?: string;
+	/** Regex patterns (or string sources) — matching files are not entrypoints */
+	entrypointExclude?: Array<string | RegExp>;
+};
+
+function asRoots(
+	moduleRoots: string | string[] | ModuleRootEntry[],
+): ModuleRootEntry[] {
+	if (typeof moduleRoots === "string") {
+		const absolute = resolve(moduleRoots);
+		return [{ absolute, relative: "." }];
+	}
+	if (moduleRoots.length === 0) return [];
+	if (typeof moduleRoots[0] === "string") {
+		return (moduleRoots as string[]).map((r) => {
+			const absolute = resolve(r);
+			return { absolute, relative: "." };
+		});
+	}
+	return (moduleRoots as ModuleRootEntry[]).map((r) => ({
+		absolute: resolve(r.absolute),
+		relative: r.relative,
+	}));
+}
+
 export function listModuleFiles(
-	moduleRootAbs: string,
+	moduleRoots: string | string[] | ModuleRootEntry[],
 	mode: "all" | "reachable",
 	seeds: string[] = [],
+	options: ListModuleFilesOptions = {},
 ): string[] {
+	const roots = asRoots(moduleRoots);
+	if (roots.length === 0) return [];
+	const cwd = options.cwd ?? process.cwd();
+	const exclude = compileEntrypointExclude(options.entrypointExclude);
+
+	const accept = (abs: string) => {
+		if (!isAppSourceFile(abs)) return false;
+		if (!findContainingRoot(roots, abs)) return false;
+		if (matchesEntrypointExclude(abs, roots, cwd, exclude)) return false;
+		return true;
+	};
+
 	if (mode === "all") {
-		return walkDir(moduleRootAbs).filter(isAppSourceFile);
+		const out: string[] = [];
+		const seen = new Set<string>();
+		for (const root of roots) {
+			for (const f of walkDir(root.absolute)) {
+				const norm = resolve(f);
+				if (seen.has(norm)) continue;
+				if (!accept(norm)) continue;
+				seen.add(norm);
+				out.push(norm);
+			}
+		}
+		return out;
 	}
 
+	const rootAbsList = roots.map((r) => r.absolute);
 	const syncQueue = seeds.map((s) => resolve(s)).filter(existsSync);
-	const out = new Set<string>();
+	const collected = new Set<string>();
 	while (syncQueue.length) {
 		const current = syncQueue.pop()!;
 		const norm = resolve(current);
-		if (out.has(norm)) continue;
-		if (!norm.startsWith(moduleRootAbs)) continue;
+		if (collected.has(norm)) continue;
+		if (!findContainingRoot(roots, norm)) continue;
 		if (!existsSync(norm)) continue;
 		if (!isAppSourceFile(norm)) continue;
-		out.add(norm);
+		// reachable mode still discovers excluded files as graph deps, but they
+		// are filtered from the returned entrypoint list below.
+		collected.add(norm);
 		const text = readFileSyncSafe(norm);
 		if (!text) continue;
 		for (const spec of extractRelativeSpecifiers(text)) {
-			const resolved = resolveSpecifier(norm, spec, moduleRootAbs);
+			const resolved = resolveSpecifier(norm, spec, rootAbsList);
 			if (resolved) syncQueue.push(resolved);
 		}
 	}
-	if (out.size === 0) {
-		return walkDir(moduleRootAbs).filter(isAppSourceFile);
-	}
-	return [...out];
+
+	let files =
+		collected.size === 0
+			? roots.flatMap((r) => walkDir(r.absolute))
+			: [...collected];
+
+	files = files.map((f) => resolve(f)).filter(accept);
+	// dedupe
+	return [...new Set(files)];
 }
 
 function readFileSyncSafe(path: string): string | null {
@@ -101,7 +167,7 @@ function extractRelativeSpecifiers(source: string): string[] {
 function resolveSpecifier(
 	fromFile: string,
 	spec: string,
-	moduleRootAbs: string,
+	moduleRootAbsList: string[],
 ): string | null {
 	const base = resolve(dirname(fromFile), spec);
 	const candidates = [
@@ -110,7 +176,15 @@ function resolveSpecifier(
 		...RESOLVE_EXTENSIONS.map((e) => join(base, `index${e}`)),
 	];
 	for (const c of candidates) {
-		if (existsSync(c) && c.startsWith(moduleRootAbs)) return c;
+		if (!existsSync(c)) continue;
+		const resolved = resolve(c);
+		if (
+			moduleRootAbsList.some(
+				(root) => resolved === root || resolved.startsWith(root + "/"),
+			)
+		) {
+			return resolved;
+		}
 	}
 	return null;
 }
@@ -132,29 +206,41 @@ export function encodeModRelPath(rel: string): string {
 }
 
 /**
- * Stable browser URL for a module under moduleRoot.
+ * Stable browser URL for a module under module root(s).
  * Always `.js` extension; path segments are encoded (`[id].js`).
+ *
+ * @param moduleRoots single abs path string, or ModuleRootEntry[]
  */
-export function toModUrl(moduleRootAbs: string, absoluteFile: string): string {
-	const rel = relative(moduleRootAbs, absoluteFile).replace(/\\/g, "/");
-	return `/@apply-react/mod/${encodeModRelPath(rel)}`;
+export function toModUrl(
+	moduleRoots: string | ModuleRootEntry[],
+	absoluteFile: string,
+): string {
+	const roots = asRoots(moduleRoots);
+	const pub = toModPublicRel(roots, absoluteFile);
+	if (!pub) {
+		throw new Error(
+			`[Apply-React] file outside moduleRoot: ${absoluteFile}`,
+		);
+	}
+	return `/@apply-react/mod/${encodeModRelPath(pub)}`;
 }
 
 /**
- * Virtual Bun entrypoint key for a source file under moduleRoot.
+ * Virtual Bun entrypoint key for a source file under module root(s).
  * Build emits path-stable `@apply-react/mod/<rel>.js` from this key.
  */
 export function toVirtualModEntry(
-	moduleRootAbs: string,
+	moduleRoots: string | ModuleRootEntry[],
 	absoluteFile: string,
 ): string {
-	const rel = relative(moduleRootAbs, absoluteFile).replace(/\\/g, "/");
-	if (!rel || rel.startsWith("..")) {
+	const roots = asRoots(moduleRoots);
+	const pub = toModPublicRel(roots, absoluteFile);
+	if (!pub) {
 		throw new Error(
-			`[Apply-React] file outside moduleRoot: ${absoluteFile} (root=${moduleRootAbs})`,
+			`[Apply-React] file outside moduleRoot: ${absoluteFile}`,
 		);
 	}
-	return `@apply-react/mod/${rel}`;
+	return `@apply-react/mod/${pub}`;
 }
 
 /** Decode a virtual entry key or public mod URL path to moduleRoot-relative form. */
@@ -171,28 +257,55 @@ export function decodeModRelSegments(encodedRel: string): string {
 		.join("/");
 }
 
-/** Decode `/@apply-react/mod/...` pathname to an absolute path under moduleRoot (may end in `.js`). */
+/**
+ * Decode `/@apply-react/mod/...` pathname to an absolute path under some module root
+ * (may end in `.js`).
+ */
 export function fromModUrlPath(
-	moduleRootAbs: string,
+	moduleRoots: string | ModuleRootEntry[],
 	urlPathname: string,
 ): string | null {
+	const roots = asRoots(moduleRoots);
 	const prefix = "/@apply-react/mod/";
 	if (!urlPathname.startsWith(prefix)) return null;
 	const rel = decodeModRelSegments(urlPathname.slice(prefix.length));
 	if (!rel || rel.includes("..")) return null;
-	const abs = resolve(moduleRootAbs, rel);
-	if (!abs.startsWith(moduleRootAbs)) return null;
-	return abs;
+
+	// Prefer multi-root: strip matching root.relative prefix first
+	if (roots.length > 1) {
+		const sorted = [...roots].sort(
+			(a, b) => b.relative.length - a.relative.length,
+		);
+		for (const root of sorted) {
+			const r = root.relative.replace(/\\/g, "/");
+			if (r && r !== "." && (rel === r || rel.startsWith(r + "/"))) {
+				const rest = rel === r ? "" : rel.slice(r.length + 1);
+				const abs = resolve(root.absolute, rest);
+				if (abs === root.absolute || abs.startsWith(root.absolute + "/")) {
+					return abs;
+				}
+			}
+		}
+	}
+
+	// Single-root style (or multi fallback): try each root with full rel
+	for (const root of roots) {
+		const abs = resolve(root.absolute, rel);
+		if (abs === root.absolute || abs.startsWith(root.absolute + "/")) {
+			return abs;
+		}
+	}
+	return null;
 }
 
 /**
  * Map a public mod URL (…/index.js) back to the on-disk source file (…/index.tsx).
  */
 export function resolveModFile(
-	moduleRootAbs: string,
+	moduleRoots: string | ModuleRootEntry[],
 	urlPathname: string,
 ): string | null {
-	const abs = fromModUrlPath(moduleRootAbs, urlPathname);
+	const abs = fromModUrlPath(moduleRoots, urlPathname);
 	if (!abs) return null;
 
 	if (existsSync(abs) && isAppSourceFile(abs)) return abs;
@@ -237,14 +350,16 @@ export function resolveBuiltModPath(
 export function rewriteRelativeImportsToModUrls(
 	source: string,
 	fromFile: string,
-	moduleRootAbs: string,
+	moduleRoots: string | ModuleRootEntry[],
 ): string {
+	const roots = asRoots(moduleRoots);
+	const rootAbsList = roots.map((r) => r.absolute);
 	return source.replace(
 		/(from\s+|import\s*\(\s*)["'](\.[^"']+)["']/g,
 		(full, prefix: string, spec: string) => {
-			const resolved = resolveSpecifier(fromFile, spec, moduleRootAbs);
+			const resolved = resolveSpecifier(fromFile, spec, rootAbsList);
 			if (!resolved) return full;
-			const url = toModUrl(moduleRootAbs, resolved);
+			const url = toModUrl(roots, resolved);
 			const quote = full.includes("'") ? "'" : '"';
 			return `${prefix}${quote}${url}${quote}`;
 		},
@@ -252,7 +367,7 @@ export function rewriteRelativeImportsToModUrls(
 }
 
 export type HandleBuiltModOptions = {
-	moduleRootAbs: string;
+	moduleRoots: ModuleRootEntry[] | string;
 	/** Absolute or cwd-relative build outdir */
 	getBuildOutDir: () => string;
 	/** Kick a rebuild when the artifact is missing (debounced by caller). */
@@ -286,8 +401,8 @@ export async function handleBuiltModRequest(
 		});
 	}
 
-	// Also try source resolve for clearer error (and rebuild kick)
-	const source = resolveModFile(options.moduleRootAbs, url.pathname);
+	const roots = asRoots(options.moduleRoots);
+	const source = resolveModFile(roots, url.pathname);
 	options.onMissingArtifact?.(url.pathname);
 
 	const hint = source
@@ -303,10 +418,10 @@ export async function handleBuiltModRequest(
 	);
 }
 
-/** @deprecated Use handleBuiltModRequest — kept for external re-exports during transition */
+/** @deprecated Use handleBuiltModRequest */
 export async function handleModRequest(
 	req: Request,
-	moduleRootAbs: string,
+	moduleRootAbs: string | ModuleRootEntry[],
 	getBuildOutDir?: () => string,
 	onMissingArtifact?: (urlPathname: string) => void,
 ): Promise<Response> {
@@ -317,7 +432,7 @@ export async function handleModRequest(
 		);
 	}
 	return handleBuiltModRequest(req, {
-		moduleRootAbs,
+		moduleRoots: moduleRootAbs,
 		getBuildOutDir,
 		onMissingArtifact,
 	});

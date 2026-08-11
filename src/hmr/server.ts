@@ -1,6 +1,11 @@
 import { join, relative, resolve } from "node:path";
 import type { Builder } from "frame-master/build";
 import {
+	type ModuleRootEntry,
+	isUnderModuleRoots,
+	toModPublicRel,
+} from "./module-root";
+import {
 	type DevRouteBuildResponse,
 	errorToPayload,
 	HMR_PROTOCOL_VERSION,
@@ -36,7 +41,11 @@ export type CreateHmrServerOptions = {
 	runtimePaths?: string[];
 	debounceMs?: number;
 	debug?: boolean;
-	/** Absolute module root for per-file graph */
+	/** Absolute module root(s) for per-file graph */
+	moduleRoots?: ModuleRootEntry[];
+	/**
+	 * @deprecated Use `moduleRoots`. Single absolute root path.
+	 */
 	moduleRootAbs?: string;
 	/**
 	 * When true, FS changes under moduleRoot rebuild the multi-entrypoint graph
@@ -78,9 +87,20 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		runtimePaths = [],
 		debounceMs = 75,
 		debug = false,
+		moduleRoots: moduleRootsOpt,
 		moduleRootAbs,
 		perFileGraph = false,
 	} = options;
+
+	const moduleRoots: ModuleRootEntry[] =
+		moduleRootsOpt && moduleRootsOpt.length > 0
+			? moduleRootsOpt.map((r) => ({
+					absolute: resolve(r.absolute),
+					relative: r.relative,
+				}))
+			: moduleRootAbs
+				? [{ absolute: resolve(moduleRootAbs), relative: "." }]
+				: [];
 
 	const queue = new DevBuildQueue();
 	const clients = new Map<Bun.ServerWebSocket<unknown>, HmrClientState>();
@@ -567,8 +587,8 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 		// Per-file graph: rebuild entrypoints, then invalidate changed module URLs
 		if (
 			perFileGraph &&
-			moduleRootAbs &&
-			resolve(absolutePath).startsWith(moduleRootAbs)
+			moduleRoots.length > 0 &&
+			isUnderModuleRoots(moduleRoots, absolutePath)
 		) {
 			const classifiedEarly = classifyWatchPath(
 				cwd,
@@ -587,11 +607,8 @@ export function createHmrServer(options: CreateHmrServerOptions): HmrServer {
 			}
 			if (classifiedEarly.kind === "ignored") return;
 
-			const rel = relative(moduleRootAbs, resolve(absolutePath)).replace(
-				/\\/g,
-				"/",
-			);
-			if (!rel || rel.startsWith("..")) return;
+			const rel = toModPublicRel(moduleRoots, resolve(absolutePath));
+			if (!rel) return;
 			pendingModuleInvalidations.add(rel);
 			void runModGraphRebuild();
 			return;

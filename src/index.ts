@@ -5,11 +5,17 @@ import { name, version } from "../package.json";
 import {
 	handleBuiltModRequest,
 	listModuleFiles,
+	resolveModFile,
 	rewriteRelativeImportsToModUrls,
 	toModUrl,
 	toVirtualModEntry,
 } from "./hmr/mod-server";
-import { resolveModuleRoot } from "./hmr/module-root";
+import {
+	findContainingRoot,
+	isUnderModuleRoots,
+	resolveModuleRoot,
+	resolveModuleRoots,
+} from "./hmr/module-root";
 import { createHmrServer } from "./hmr/server";
 import { getRoutePathnameFromFileChange } from "./hmr/watch";
 
@@ -27,7 +33,16 @@ export {
 } from "./hmr/watch";
 export { extractImportSpecifiers } from "./hmr/deps";
 export { createHmrServer } from "./hmr/server";
-export { resolveModuleRoot } from "./hmr/module-root";
+export {
+	resolveModuleRoot,
+	resolveModuleRoots,
+	findContainingRoot,
+	isUnderModuleRoots,
+	compileEntrypointExclude,
+	matchesEntrypointExclude,
+	toModPublicRel,
+} from "./hmr/module-root";
+export type { ModuleRootEntry } from "./hmr/module-root";
 export {
 	toModUrl,
 	toVirtualModEntry,
@@ -80,8 +95,11 @@ export default function applyReactPluginToHTML(
 		? join(cwd, props.clientShellPath)
 		: join(import.meta.dir, "client-shell.tsx");
 
-	const { absolute: moduleRootAbs, relative: moduleRootRel } =
-		resolveModuleRoot(cwd, route, props.moduleRoot);
+	const moduleRoots = resolveModuleRoots(cwd, route, props.moduleRoot);
+	const moduleRootRels = moduleRoots.map((r) => r.relative);
+	/** Primary root (first) — kept for single-value public props / BC */
+	const moduleRootRel =
+		moduleRootRels.length === 1 ? moduleRootRels[0]! : moduleRootRels;
 
 	const perFileGraph =
 		enableHMR &&
@@ -89,6 +107,7 @@ export default function applyReactPluginToHTML(
 		(hmrOpts?.moduleGraph ?? "per-file") === "per-file";
 
 	const entrypointMode = hmrOpts?.entrypointMode ?? "all";
+	const entrypointExclude = hmrOpts?.entrypointExclude;
 
 	const fileRouter = new Bun.FileSystemRouter({
 		dir: join(cwd, route),
@@ -108,7 +127,7 @@ export default function applyReactPluginToHTML(
 	const routeDir = join(cwd, route);
 
 	const resolvedWatchDirs =
-		watchDirectories ?? (perFileGraph ? [moduleRootRel] : ["."]);
+		watchDirectories ?? (perFileGraph ? moduleRootRels : ["."]);
 
 	const hmr = createHmrServer({
 		cwd,
@@ -126,7 +145,7 @@ export default function applyReactPluginToHTML(
 		],
 		debounceMs: hmrOpts?.debounceMs ?? 75,
 		debug,
-		moduleRootAbs,
+		moduleRoots,
 		perFileGraph,
 	});
 
@@ -140,7 +159,7 @@ export default function applyReactPluginToHTML(
 
 	const routeImportLine = (pathname: string, fp: string) => {
 		if (perFileGraph) {
-			const mod = toModUrl(moduleRootAbs, fp);
+			const mod = toModUrl(moduleRoots, fp);
 			return `"${pathname}": () => import(${JSON.stringify(mod)}).then((m) => m.default)`;
 		}
 		return `"${pathname}": () => import(${JSON.stringify(fp)}).then((m) => m.default)`;
@@ -157,6 +176,7 @@ export default function applyReactPluginToHTML(
 			...hmrOpts,
 			moduleGraph: perFileGraph ? "per-file" : "bundled",
 			entrypointMode,
+			entrypointExclude,
 			preserveState: hmrOpts?.preserveState ?? true,
 		},
 	};
@@ -185,8 +205,11 @@ export default function applyReactPluginToHTML(
 				? join(cwd, fallbacks.defaultLoadingComponentPath)
 				: "",
 		].filter(Boolean);
-		const files = listModuleFiles(moduleRootAbs, entrypointMode, seeds);
-		return files.map((fp) => toVirtualModEntry(moduleRootAbs, fp));
+		const files = listModuleFiles(moduleRoots, entrypointMode, seeds, {
+			cwd,
+			entrypointExclude,
+		});
+		return files.map((fp) => toVirtualModEntry(moduleRoots, fp));
 	};
 
 	const virtualFiles = (): Record<string, string> => ({
@@ -264,26 +287,25 @@ export default function applyReactPluginToHTML(
 				external: true,
 			}));
 
-			// Virtual entry keys `@apply-react/mod/<rel>` → real source under moduleRoot
+			// Virtual entry keys `@apply-react/mod/<rel>` → real source under moduleRoot(s)
 			if (perFileGraph) {
 				build.onResolve({ filter: /^@apply-react\/mod\// }, (args) => {
-					const key = args.path.split("?")[0] ?? args.path;
-					const rel = key.slice("@apply-react/mod/".length);
-					if (!rel || rel.includes("..")) return undefined;
-					const abs = resolve(moduleRootAbs, rel);
-					if (!abs.startsWith(moduleRootAbs)) return undefined;
-					// Real path, default namespace — other plugins' onLoad see the source file
-					return { path: abs };
+					const key = (args.path.split("?")[0] ?? args.path).replace(
+						/\\/g,
+						"/",
+					);
+					// resolveModFile expects a public URL path `/@apply-react/mod/...`
+					const urlPath = key.startsWith("/") ? key : `/${key}`;
+					const file = resolveModFile(moduleRoots, urlPath);
+					if (!file) return undefined;
+					return { path: file };
 				});
 
 				// Bare react/* from app modules stay external (import map resolves in browser)
 				build.onResolve({ filter: REACT_BARE_IMPORT_RE }, (args) => {
 					if (!args.importer) return undefined;
 					const importer = args.importer.split("?")[0] ?? args.importer;
-					if (
-						importer.startsWith(moduleRootAbs + "/") ||
-						importer === moduleRootAbs
-					) {
+					if (isUnderModuleRoots(moduleRoots, importer)) {
 						return { path: args.path, external: true };
 					}
 					return undefined;
@@ -332,12 +354,7 @@ export default function applyReactPluginToHTML(
 						const normalized = resolve(
 							(args.path.split("?")[0] ?? args.path).replace(/\\/g, "/"),
 						);
-						if (
-							!(
-								normalized.startsWith(moduleRootAbs + "/") ||
-								normalized === moduleRootAbs
-							)
-						) {
+						if (!isUnderModuleRoots(moduleRoots, normalized)) {
 							return undefined;
 						}
 						const chained = (
@@ -367,7 +384,7 @@ export default function applyReactPluginToHTML(
 							contents: rewriteRelativeImportsToModUrls(
 								text,
 								normalized,
-								moduleRootAbs,
+								moduleRoots,
 							),
 							loader,
 						};
@@ -418,7 +435,7 @@ export default function applyReactPluginToHTML(
 
 	if (debug) {
 		console.log(
-			`[Apply-React] moduleRoot=${moduleRootRel} perFileGraph=${perFileGraph} entrypointMode=${entrypointMode}`,
+			`[Apply-React] moduleRoot=${JSON.stringify(moduleRootRels)} perFileGraph=${perFileGraph} entrypointMode=${entrypointMode} entrypointExclude=${entrypointExclude?.length ?? 0}`,
 		);
 	}
 
@@ -479,7 +496,7 @@ export default function applyReactPluginToHTML(
 				"/@apply-react/mod/*": perFileGraph
 					? (req) =>
 							handleBuiltModRequest(req, {
-								moduleRootAbs,
+								moduleRoots,
 								getBuildOutDir: () => liveOutDir,
 								onMissingArtifact: kickRebuildForMissingMod,
 							})

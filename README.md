@@ -112,7 +112,7 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 | `route`           | `string`    | -           | Base path to your routes directory                          |
 | `clientShellPath` | `string?`   | -           | Optional path to a custom client-side shell component       |
 | `enableHMR`               | `boolean`   | `true` in dev | Enable Hot Module Replacement for development                          |
-| `moduleRoot`              | `string?`   | inferred    | App source root for per-file modules (not fixed to `src`; e.g. `app`)  |
+| `moduleRoot`              | `string \| string[]?` | inferred | App source root(s) for per-file modules (e.g. `"src"` or `["src","packages/ui"]`) |
 | `hydration`               | `"hydrate" \| "render"` | `"hydrate"` | `hydrate` attaches to SSG HTML; `render` uses `createRoot` |
 | `watchDirectories`        | `string[]?` | `[moduleRoot]` in per-file HMR | Directories watched for HMR file changes |
 | `watchDirectoriesExclude` | `string[]?` | -           | Directories excluded from HMR watching                                 |
@@ -134,9 +134,21 @@ When HMR is on (dev), `hmr.moduleGraph` defaults to **`per-file`**:
 | --- | --- | --- |
 | `moduleGraph` | `per-file` (dev) | `per-file` multi-entrypoint graph, or `bundled` legacy route bundles |
 | `entrypointMode` | `all` | `all` files under `moduleRoot`, or `reachable` from routes + shell |
+| `entrypointExclude` | `[]` | Regex (or string patterns) — matching modules are not entrypoints |
 | `preserveState` | `true` | Prefer soft page swaps without remounting ErrorWrapper |
 | `debounceMs` | `75` | FS change debounce before rebuild |
 | `overlay` | `true` | Client error overlay |
+
+```ts
+ApplyReact({
+  style: "nextjs",
+  route: "src/pages",
+  moduleRoot: ["src", "packages/ui"],
+  hmr: {
+    entrypointExclude: [/\.test\.[tj]sx?$/, /\/stories\//],
+  },
+});
+```
 
 ### Dev HMR: per-file modules (default)
 
