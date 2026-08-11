@@ -56,8 +56,38 @@ export function resolveReactPackage(
 	}
 }
 
+const VALID_EXPORT_IDENT = /^[A-Za-z_$][\w$]*$/;
+
 /**
- * Virtual entry sources that re-export real react packages.
+ * Collect exportable binding names from a resolved CJS/ESM package.
+ * Bun's `export *` from CJS react does **not** emit named ESM exports — we must
+ * list them explicitly or `import { Component } from "/react.js"` fails.
+ */
+export function collectPackageExportNames(resolvedPath: string): string[] {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const mod = require(resolvedPath) as Record<string, unknown> | null;
+	const keys = new Set<string>();
+	const take = (obj: unknown) => {
+		if (!obj || typeof obj !== "object") return;
+		for (const k of Object.keys(obj as object)) {
+			if (k === "default" || k === "__esModule") continue;
+			if (!VALID_EXPORT_IDENT.test(k)) continue;
+			keys.add(k);
+		}
+	};
+	take(mod);
+	if (mod && typeof mod === "object" && "default" in mod) {
+		take((mod as { default: unknown }).default);
+	}
+	return [...keys].sort();
+}
+
+/**
+ * Virtual entry sources that re-export real react packages with **explicit**
+ * named exports. Bun drops `export *` from CJS `react` in the final ESM export
+ * list — only `export const X = …` / `export { X }` survive for browser imports
+ * like `import { Component } from "/react.js"`.
+ *
  * Entrypoint keys are public paths (`react.js`) so Bun emits them at outdir root.
  */
 export function buildReactVendorVirtualFiles(
@@ -68,11 +98,21 @@ export function buildReactVendorVirtualFiles(
 	for (const entry of REACT_VENDOR_ENTRYPOINTS) {
 		const spec = REACT_VENDOR_PACKAGE[entry];
 		const resolved = resolveReactPackage(spec, cwd, fallbackDir);
-		// Re-export everything + default when present
+		const names = collectPackageExportNames(resolved);
+		// Bind from namespace first, then CJS default (module.exports)
+		const namedExports = names
+			.map(
+				(k) =>
+					`export const ${k} = __ns.${k} !== undefined ? __ns.${k} : __def.${k};`,
+			)
+			.join("\n");
 		out[entry] =
-			`export * from ${JSON.stringify(resolved)};\n` +
-			`import * as __m from ${JSON.stringify(resolved)};\n` +
-			`export default __m.default ?? __m;\n`;
+			`import * as __ns from ${JSON.stringify(resolved)};\n` +
+			`const __def = (__ns.default != null && typeof __ns.default === "object")\n` +
+			`  ? __ns.default\n` +
+			`  : __ns;\n` +
+			`export default (__ns.default !== undefined ? __ns.default : __ns);\n` +
+			(namedExports ? `${namedExports}\n` : "");
 	}
 	return out;
 }
@@ -95,6 +135,37 @@ const IMPORT_MAP_SCRIPT_RE =
  * Needed because browsers cannot resolve bare specifiers without an import map,
  * and Bun keeps the original bare path when a module is marked external.
  */
+/**
+ * Bun externalizes CJS `require("react")` as `import * as React from "/react.js"`,
+ * but react/jsx-dev-runtime **assigns** to `React` (valid for `var`, illegal for
+ * ESM live bindings). Rewrite to a local var so vendor chunks load in browsers.
+ */
+export function fixExternalReactCjsInterop(code: string): string {
+	if (!code.includes("/react.js") && !code.includes("/react-dom")) {
+		return code;
+	}
+
+	// import * as Name from "/react.js";
+	code = code.replace(
+		/import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+(["'])(\/react(?:-dom)?(?:\/[\w-]+)?\.js)\2\s*;/g,
+		(_full, name: string, q: string, spec: string) =>
+			`import * as __${name}_NS from ${q}${spec}${q};\n` +
+			`var ${name} = __${name}_NS.default !== undefined && __${name}_NS.default !== null\n` +
+			`  ? __${name}_NS.default\n` +
+			`  : __${name}_NS;`,
+	);
+
+	// import Name from "/react.js";
+	code = code.replace(
+		/import\s+([A-Za-z_$][\w$]*)\s+from\s+(["'])(\/react(?:-dom)?(?:\/[\w-]+)?\.js)\2\s*;/g,
+		(_full, name: string, q: string, spec: string) =>
+			`import __${name}_DEF from ${q}${spec}${q};\n` +
+			`var ${name} = __${name}_DEF;`,
+	);
+
+	return code;
+}
+
 export function rewriteBareReactImportsToUrls(code: string): string {
 	if (!code.includes("react")) return code;
 

@@ -19,6 +19,7 @@ import {
 import {
 	buildReactVendorVirtualFiles,
 	ensureSingleImportMapInHtml,
+	fixExternalReactCjsInterop,
 	REACT_BARE_TO_URL,
 	REACT_VENDOR_ENTRYPOINTS,
 	rewriteBareReactImportsToUrls,
@@ -550,12 +551,15 @@ export default function applyReactPluginToHTML(
 								const text = await Bun.file(out.path).text();
 								if (!text.includes("from ") && !text.includes("import "))
 									return;
-								const next = rewriteBareReactImportsToUrls(text);
+								let next = rewriteBareReactImportsToUrls(text);
+								// CJS vendor bodies assign to `React` after Bun turns
+								// require("react") into `import * as React` — illegal ESM.
+								next = fixExternalReactCjsInterop(next);
 								if (next !== text) {
 									await Bun.write(out.path, next);
 									if (debug) {
 										console.log(
-											`[Apply-React] rewrote bare react imports in ${out.path}`,
+											`[Apply-React] rewrote react imports/interop in ${out.path}`,
 										);
 									}
 								}

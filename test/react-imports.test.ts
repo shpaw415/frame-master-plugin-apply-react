@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	buildReactVendorVirtualFiles,
 	ensureSingleImportMapInHtml,
+	fixExternalReactCjsInterop,
 	htmlHasImportMap,
 	htmlHasOurImportMap,
 	importMapScriptTag,
@@ -144,12 +145,57 @@ describe("mergeImportMaps", () => {
 	});
 });
 
+describe("fixExternalReactCjsInterop", () => {
+	test("turns import * as React into assignable local var", () => {
+		const src = `import * as React from "/react.js";\nReact = { x: 1 };\n`;
+		const out = fixExternalReactCjsInterop(src);
+		expect(out).toContain("import * as __React_NS from \"/react.js\"");
+		expect(out).toContain("var React =");
+		expect(out).not.toMatch(/^import \* as React from/m);
+	});
+});
+
 describe("buildReactVendorVirtualFiles", () => {
-	test("emits all public vendor entry keys", () => {
+	test("emits all public vendor entry keys with explicit named exports", () => {
 		const files = buildReactVendorVirtualFiles(process.cwd());
 		for (const key of REACT_VENDOR_ENTRYPOINTS) {
 			expect(files[key]).toBeTruthy();
-			expect(files[key]).toContain("export * from");
+			expect(files[key]).toContain("export const");
+			expect(files[key]).toContain("export default");
 		}
+		expect(files["react.js"]).toContain("export const Component");
+		expect(files["react.js"]).toContain("export const useState");
+	});
+
+	test("built react.js provides named ESM export Component", async () => {
+		const files = buildReactVendorVirtualFiles(process.cwd());
+		const outdir = `/tmp/ar-vendor-${Date.now()}`;
+		const r = await Bun.build({
+			entrypoints: ["react.js"],
+			outdir,
+			target: "browser",
+			format: "esm",
+			plugins: [
+				{
+					name: "v",
+					setup(b) {
+						b.onResolve({ filter: /^react\.js$/ }, () => ({
+							path: "react.js",
+							namespace: "v",
+						}));
+						b.onLoad({ filter: /.*/, namespace: "v" }, () => ({
+							contents: files["react.js"]!,
+							loader: "js",
+						}));
+					},
+				},
+			],
+		});
+		expect(r.success).toBe(true);
+		const code = await Bun.file(`${outdir}/react.js`).text();
+		expect(code).toMatch(/Component/);
+		// Must appear in the live ESM export list (not only inside CJS body)
+		expect(code).toMatch(/export\s*\{[\s\S]*\bComponent\b/);
+		await Bun.$`rm -rf ${outdir}`.quiet();
 	});
 });
