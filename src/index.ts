@@ -16,6 +16,11 @@ import {
 	resolveModuleRoot,
 	resolveModuleRoots,
 } from "./hmr/module-root";
+import {
+	importMapScriptTag,
+	injectImportMapIntoHtml,
+	rewriteBareReactImportsToUrls,
+} from "./hmr/react-imports";
 import { createHmrServer } from "./hmr/server";
 import { getRoutePathnameFromFileChange } from "./hmr/watch";
 
@@ -56,16 +61,6 @@ export {
 
 const REACT_BARE_IMPORT_RE =
 	/^(react|react-dom)(\/jsx-runtime|\/jsx-dev-runtime|\/client)?$/;
-
-const IMPORT_MAP_JSON = JSON.stringify({
-	imports: {
-		react: "/react.js",
-		"react-dom": "/react-dom.js",
-		"react-dom/client": "/react-dom/client.js",
-		"react/jsx-runtime": "/react/jsx-runtime.js",
-		"react/jsx-dev-runtime": "/react/jsx-dev-runtime.js",
-	},
-});
 
 /**
  * Apply React Plugin for Frame Master
@@ -247,7 +242,7 @@ export default function applyReactPluginToHTML(
 				)),
 	});
 
-	const importMapScript = `<script type="importmap">${IMPORT_MAP_JSON}</script>`;
+	const importMapScript = importMapScriptTag();
 
 	const applyReactBuildPlugin = {
 		name: "apply-routes-to-hydrate",
@@ -392,11 +387,13 @@ export default function applyReactPluginToHTML(
 				);
 			}
 
+			// Import map must be FIRST in <head> (before any type=module scripts).
 			const htmlrewriter = new HTMLRewriter()
 				.on("head", {
 					element(element) {
 						if (perFileGraph) {
-							element.append(importMapScript, { html: true });
+							// prepend so it wins over existing head module scripts
+							element.prepend(importMapScript, { html: true });
 						}
 						element.append(
 							`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
@@ -410,16 +407,31 @@ export default function applyReactPluginToHTML(
 					},
 				});
 
+			const finalizeHtml = (raw: string): string => {
+				let html = htmlrewriter.transform(raw);
+				// String-level failsafe: finally("html") always lands a map in the
+				// built artifact even if head was missing or rewriter skipped.
+				if (perFileGraph) {
+					html = injectImportMapIntoHtml(html);
+				}
+				return html;
+			};
+
 			build.onLoad({ filter: /\.html$/ }, async (args) => {
 				const contents =
 					args.__chainedContents ?? (await Bun.file(args.path).text());
 				return {
-					contents: htmlrewriter.transform(contents as string),
+					contents: finalizeHtml(contents as string),
 				};
 			});
-			build.finally("html", ({ contents }) => ({
-				contents: htmlrewriter.transform(contents as string),
-			}));
+			// Frame-Master chained post-process on every HTML build output
+			build.finally("html", ({ contents }) => {
+				const raw =
+					typeof contents === "string"
+						? contents
+						: new TextDecoder().decode(contents as unknown as Uint8Array);
+				return { contents: finalizeHtml(raw) };
+			});
 
 			if (!perFileGraph) {
 				build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
@@ -487,7 +499,34 @@ export default function applyReactPluginToHTML(
 					plugins: [applyReactBuildPlugin],
 				};
 			},
-			afterBuild() {
+			async afterBuild(_config, result) {
+				// Bun keeps bare "react/…" when external — browsers need absolute URLs
+				// (import maps are best-effort; absolute paths always work).
+				if (perFileGraph && result?.outputs?.length) {
+					await Promise.all(
+						result.outputs.map(
+							async (out: { path: string }) => {
+								if (!out.path.endsWith(".js")) return;
+								try {
+									const text = await Bun.file(out.path).text();
+									if (!text.includes("from ") && !text.includes("import "))
+										return;
+									const next = rewriteBareReactImportsToUrls(text);
+									if (next !== text) {
+										await Bun.write(out.path, next);
+										if (debug) {
+											console.log(
+												`[Apply-React] rewrote bare react imports in ${out.path}`,
+											);
+										}
+									}
+								} catch {
+									// ignore missing/deleted artifacts
+								}
+							},
+						),
+					);
+				}
 				hmr.handleAfterBuild();
 			},
 		},
@@ -562,13 +601,15 @@ export default function applyReactPluginToHTML(
 						.on("head", {
 							element(element) {
 								if (perFileGraph) {
-									element.append(importMapScript, { html: true });
+									// Prepend — import maps must precede module scripts.
+									// Idempotent with shell <ApplyReactImportMap /> via stable id
+									// (browsers tolerate duplicate maps if identical; we still
+									// prefer a single early map from build.finally when possible).
+									element.prepend(importMapScript, { html: true });
 								}
 								element.append(
 									`<script src="/@apply-react/client-hydrate.js" type="module"></script>`,
-									{
-										html: true,
-									},
+									{ html: true },
 								);
 							},
 						})

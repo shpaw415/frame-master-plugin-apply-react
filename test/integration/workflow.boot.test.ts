@@ -181,6 +181,15 @@ describe("integration: apply-react boot + multi-entrypoint mod", () => {
 				const code = await res.text();
 				expect(code).toContain("/@apply-react/mod/ctx.js");
 				expect(code).not.toContain('from "../ctx"');
+				// Browser cannot resolve bare "react/…" without import map — must be absolute
+				expect(code).not.toMatch(
+					/from\s+["']react\/jsx-(dev-)?runtime["']/,
+				);
+				if (code.includes("jsx") || code.includes("jsxDEV")) {
+					expect(code).toMatch(
+						/from\s+["']\/react\/jsx-(dev-)?runtime\.js["']/,
+					);
+				}
 			} finally {
 				process.chdir(prev);
 			}

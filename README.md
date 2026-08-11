@@ -61,6 +61,32 @@ export default function ClientShell({ children }: { children: JSX.Element }) {
 }
 ```
 
+### 2b. Server shell import map (recommended with per-file HMR)
+
+Bare `react` / `react/jsx-dev-runtime` imports need an [import map](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap)
+**before** any `type="module"` script. The plugin injects one via `build.finally("html")`
+and runtime HTML rewrite; you can also place it explicitly in your SSR shell:
+
+```tsx
+// src/shell.tsx (react-to-html document shell)
+import { ApplyReactImportMap } from "frame-master-plugin-apply-react/import-map";
+
+export default function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <ApplyReactImportMap />
+        <meta charSet="utf-8" />
+        <title>App</title>
+      </head>
+      <body>
+        <div id="root">{children}</div>
+      </body>
+    </html>
+  );
+}
+```
+
 ### 3. Build Interactive Pages
 
 ```tsx

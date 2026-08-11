@@ -22,7 +22,8 @@
 		"./router": "./src/router.tsx",
 		"./types": "./src/types.d.ts",
 		"./utils": "./src/utils.ts",
-		"./props": "./@apply-react/props.ts"
+		"./props": "./@apply-react/props.ts",
+		"./import-map": "./src/import-map.tsx"
 	},
 	"scripts": {
 		"dev": "NODE_ENV=development bun frame-master dev",
