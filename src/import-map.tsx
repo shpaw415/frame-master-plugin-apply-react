@@ -6,7 +6,11 @@ export {
 	importMapJson,
 	importMapScriptTag,
 	injectImportMapIntoHtml,
+	ensureSingleImportMapInHtml,
 	htmlHasImportMap,
+	htmlHasOurImportMap,
+	parseImportMapScripts,
+	mergeImportMaps,
 	rewriteBareReactImportsToUrls,
 } from "./hmr/react-imports";
 
@@ -24,8 +28,9 @@ export type ApplyReactImportMapProps = {
  * Place inside your document `<head>` (server shell / react-to-html shell) so the
  * browser can resolve `react`, `react/jsx-dev-runtime`, etc. before any module runs.
  *
- * The build pipeline also injects this via `finally("html")`; this component is
- * the explicit DX hook when you control the shell markup.
+ * The build pipeline runs `ensureSingleImportMapInHtml` in `finally("html")`:
+ * if this component is already present it is **merged/replaced into one** map
+ * (never two import maps). Safe to use both shell helper + plugin injection.
  *
  * @example
  * ```tsx

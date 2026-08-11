@@ -16,6 +16,10 @@ const REACT_BARE_SPECS = Object.keys(REACT_BARE_TO_URL)
 	.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
 	.join("|");
 
+/** Match any importmap script (attribute order tolerant). */
+const IMPORT_MAP_SCRIPT_RE =
+	/<script\b[^>]*\btype\s*=\s*["']importmap["'][^>]*>[\s\S]*?<\/script>/gi;
+
 /**
  * Rewrite bare react/* import/export specifiers to absolute `/react…js` URLs.
  * Needed because browsers cannot resolve bare specifiers without an import map,
@@ -55,16 +59,25 @@ export function rewriteBareReactImportsToUrls(code: string): string {
 	return out;
 }
 
-export function importMapJson(): string {
-	return JSON.stringify({ imports: { ...REACT_BARE_TO_URL } });
+export function importMapJson(
+	imports: Record<string, string> = REACT_BARE_TO_URL,
+): string {
+	return JSON.stringify({ imports: { ...imports } });
 }
 
 /** Full `<script type="importmap">` tag for HTML injection. */
-export function importMapScriptTag(): string {
-	return `<script type="importmap" id="${IMPORT_MAP_SCRIPT_ID}" data-apply-react-importmap="1">${importMapJson()}</script>`;
+export function importMapScriptTag(
+	imports: Record<string, string> = REACT_BARE_TO_URL,
+): string {
+	return `<script type="importmap" id="${IMPORT_MAP_SCRIPT_ID}" data-apply-react-importmap="1">${importMapJson(imports)}</script>`;
 }
 
+/** True if HTML contains any import map (ours or foreign). */
 export function htmlHasImportMap(html: string): boolean {
+	return /type\s*=\s*["']importmap["']/i.test(html);
+}
+
+export function htmlHasOurImportMap(html: string): boolean {
 	return (
 		html.includes(`id="${IMPORT_MAP_SCRIPT_ID}"`) ||
 		html.includes('data-apply-react-importmap="1"') ||
@@ -72,37 +85,144 @@ export function htmlHasImportMap(html: string): boolean {
 	);
 }
 
+export type ParsedImportMapScript = {
+	fullMatch: string;
+	body: string;
+	imports: Record<string, string>;
+	isOurs: boolean;
+	parseOk: boolean;
+};
+
 /**
- * Idempotently inject the import map at the earliest valid position in HTML
- * so it precedes any `type="module"` scripts (browser requirement).
- *
- * Used by `build.finally("html")` and as a string-level failsafe.
+ * Extract all `<script type="importmap">` blocks in document order.
  */
-export function injectImportMapIntoHtml(html: string): string {
-	if (!html || htmlHasImportMap(html)) return html;
+export function parseImportMapScripts(html: string): ParsedImportMapScript[] {
+	const out: ParsedImportMapScript[] = [];
+	const re = new RegExp(IMPORT_MAP_SCRIPT_RE.source, "gi");
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(html)) != null) {
+		const fullMatch = m[0];
+		const openEnd = fullMatch.indexOf(">");
+		const closeStart = fullMatch.lastIndexOf("</");
+		const body =
+			openEnd >= 0 && closeStart > openEnd
+				? fullMatch.slice(openEnd + 1, closeStart).trim()
+				: "";
+		const isOurs =
+			fullMatch.includes(IMPORT_MAP_SCRIPT_ID) ||
+			fullMatch.includes("data-apply-react-importmap");
+		let imports: Record<string, string> = {};
+		let parseOk = false;
+		try {
+			const parsed = JSON.parse(body) as { imports?: Record<string, string> };
+			if (parsed && typeof parsed === "object" && parsed.imports) {
+				imports = { ...parsed.imports };
+				parseOk = true;
+			}
+		} catch {
+			parseOk = false;
+		}
+		out.push({ fullMatch, body, imports, isOurs, parseOk });
+	}
+	return out;
+}
 
-	const tag = importMapScriptTag();
+/**
+ * Merge import maps in document order, then overlay apply-react react/* keys
+ * (ours win on conflict for those keys).
+ */
+export function mergeImportMaps(
+	maps: Array<Record<string, string>>,
+	ours: Record<string, string> = REACT_BARE_TO_URL,
+): Record<string, string> {
+	const merged: Record<string, string> = {};
+	for (const m of maps) {
+		Object.assign(merged, m);
+	}
+	Object.assign(merged, ours);
+	return merged;
+}
 
-	// Immediately after <head ...> (preferred — before any head scripts)
+function stripAllImportMaps(html: string): string {
+	return html.replace(new RegExp(IMPORT_MAP_SCRIPT_RE.source, "gi"), "");
+}
+
+function insertTagAfterHeadOpen(html: string, tag: string): string {
 	if (/<head\b[^>]*>/i.test(html)) {
 		return html.replace(/<head\b[^>]*>/i, (open) => `${open}${tag}`);
 	}
-
-	// After <html ...> wrap a head if missing
 	if (/<html\b[^>]*>/i.test(html)) {
 		return html.replace(
 			/<html\b[^>]*>/i,
 			(open) => `${open}<head>${tag}</head>`,
 		);
 	}
-
-	// Doctype-only / fragment
 	if (/<!doctype\s+html[^>]*>/i.test(html)) {
 		return html.replace(
 			/<!doctype\s+html[^>]*>/i,
 			(d) => `${d}<head>${tag}</head>`,
 		);
 	}
-
 	return `${tag}${html}`;
+}
+
+/**
+ * Ensure exactly one canonical import map early in `<head>`.
+ *
+ * - No map → inject ours
+ * - Ours only → replace body with canonical (merge preserved foreign keys if any)
+ * - Foreign map(s) → merge imports, overlay react keys, single tag
+ * - Multiple maps → collapse to one merged tag
+ *
+ * Never leaves two `type="importmap"` scripts in the document.
+ */
+export function ensureSingleImportMapInHtml(html: string): string {
+	if (!html) return html;
+
+	const existing = parseImportMapScripts(html);
+	const merged = mergeImportMaps(
+		existing.filter((e) => e.parseOk).map((e) => e.imports),
+		REACT_BARE_TO_URL,
+	);
+	const tag = importMapScriptTag(merged);
+
+	// Fast path: already exactly one map and body matches canonical
+	if (existing.length === 1) {
+		const only = existing[0]!;
+		if (only.parseOk && only.fullMatch === tag) {
+			return html;
+		}
+		// Compare JSON payloads (ignore attribute noise)
+		if (only.parseOk) {
+			try {
+				const want = importMapJson(merged);
+				const got = JSON.stringify({ imports: only.imports });
+				// Normalize key order via parse
+				const wantNorm = JSON.stringify(JSON.parse(want));
+				const gotNorm = JSON.stringify({
+					imports: JSON.parse(got).imports,
+				});
+				if (
+					wantNorm === gotNorm &&
+					only.isOurs &&
+					htmlHasOurImportMap(only.fullMatch)
+				) {
+					return html;
+				}
+			} catch {
+				// fall through to replace
+			}
+		}
+	}
+
+	const stripped = stripAllImportMaps(html);
+	return insertTagAfterHeadOpen(stripped, tag);
+}
+
+/**
+ * @deprecated Use {@link ensureSingleImportMapInHtml} — merge/replace/collapse.
+ * Kept as alias for external callers.
+ */
+export function injectImportMapIntoHtml(html: string): string {
+	return ensureSingleImportMapInHtml(html);
 }

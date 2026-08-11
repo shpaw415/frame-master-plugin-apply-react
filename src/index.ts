@@ -17,8 +17,7 @@ import {
 	resolveModuleRoots,
 } from "./hmr/module-root";
 import {
-	importMapScriptTag,
-	injectImportMapIntoHtml,
+	ensureSingleImportMapInHtml,
 	rewriteBareReactImportsToUrls,
 } from "./hmr/react-imports";
 import { createHmrServer } from "./hmr/server";
@@ -242,8 +241,6 @@ export default function applyReactPluginToHTML(
 				)),
 	});
 
-	const importMapScript = importMapScriptTag();
-
 	const applyReactBuildPlugin = {
 		name: "apply-routes-to-hydrate",
 		setup(build: {
@@ -387,14 +384,11 @@ export default function applyReactPluginToHTML(
 				);
 			}
 
-			// Import map must be FIRST in <head> (before any type=module scripts).
+			// Hydrate script only via HTMLRewriter. Import map is handled once by
+			// ensureSingleImportMapInHtml (merge/replace/collapse — never 2 maps).
 			const htmlrewriter = new HTMLRewriter()
 				.on("head", {
 					element(element) {
-						if (perFileGraph) {
-							// prepend so it wins over existing head module scripts
-							element.prepend(importMapScript, { html: true });
-						}
 						element.append(
 							`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
 							{ html: true },
@@ -409,10 +403,8 @@ export default function applyReactPluginToHTML(
 
 			const finalizeHtml = (raw: string): string => {
 				let html = htmlrewriter.transform(raw);
-				// String-level failsafe: finally("html") always lands a map in the
-				// built artifact even if head was missing or rewriter skipped.
 				if (perFileGraph) {
-					html = injectImportMapIntoHtml(html);
+					html = ensureSingleImportMapInHtml(html);
 				}
 				return html;
 			};
@@ -597,16 +589,11 @@ export default function applyReactPluginToHTML(
 			},
 			html_rewrite: {
 				rewrite(reWriter) {
+					// Import map: rely on built HTML (ensureSingleImportMapInHtml in
+					// finally("html")). Do not prepend a second map at runtime.
 					reWriter
 						.on("head", {
 							element(element) {
-								if (perFileGraph) {
-									// Prepend — import maps must precede module scripts.
-									// Idempotent with shell <ApplyReactImportMap /> via stable id
-									// (browsers tolerate duplicate maps if identical; we still
-									// prefer a single early map from build.finally when possible).
-									element.prepend(importMapScript, { html: true });
-								}
 								element.append(
 									`<script src="/@apply-react/client-hydrate.js" type="module"></script>`,
 									{ html: true },
