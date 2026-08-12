@@ -7,6 +7,7 @@ import type { FrameMasterPlugin } from "frame-master/plugin";
 import { directiveManager, isProd } from "frame-master/utils";
 import { name, version } from "../package.json";
 import { escapeRegExp } from "./plugin-utils";
+import { transformReactRefreshModule } from "./react-refresh-transform";
 
 const TRACKED_SOURCE_EXTENSIONS = new Set([
 	".ts",
@@ -45,6 +46,7 @@ const VirtualModules = [
 	"@apply-react/client-routes.ts",
 	"@apply-react/client-hydrate.tsx",
 	"@apply-react/HMR.ts",
+	"@apply-react/react-refresh-runtime.ts",
 	"@apply-react/client-shell.tsx",
 	"@apply-react/404.tsx",
 	"@apply-react/loading.tsx",
@@ -108,6 +110,21 @@ function resolveWithKnownExtensions(candidatePath: string) {
 	}
 
 	return null;
+}
+
+function getBunLoader(filePath: string) {
+	switch (extname(filePath)) {
+		case ".tsx":
+			return "tsx" as const;
+		case ".jsx":
+			return "jsx" as const;
+		case ".ts":
+		case ".mts":
+		case ".cts":
+			return "ts" as const;
+		default:
+			return "js" as const;
+	}
 }
 
 function resolveImportSpecifier(
@@ -577,6 +594,10 @@ export default function applyReactPluginToHTML(
 			"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
 			// HMR modules
 			"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
+			"@apply-react/react-refresh-runtime.ts":
+				enableHMR && !isProd()
+					? `export * from "${join(__dirname, "react-refresh-runtime.ts")}";`
+					: "export function performReactRefresh() {}",
 			"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
 			"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, hydration, entrypointExtensions, fallbacks })}; export default props;`,
 			"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
@@ -610,6 +631,30 @@ export default function applyReactPluginToHTML(
 										loader: "js",
 									};
 								}
+
+								if (
+									!enableHMR ||
+									isProd() ||
+									!isWithinProject(cwd, args.path) ||
+									!TRACKED_SOURCE_EXTENSIONS.has(extname(args.path)) ||
+									NON_RECURSIVE_EXTENSIONS.has(extname(args.path))
+								) {
+									return;
+								}
+
+								const contents =
+									args.__chainedContents ?? (await Bun.file(args.path).text());
+								const moduleId = relative(cwd, args.path).replaceAll("\\", "/");
+								return {
+									contents: await transformReactRefreshModule(
+										contents as string,
+										{
+											filename: args.path,
+											moduleId,
+										},
+									),
+									loader: getBunLoader(args.path),
+								};
 							});
 
 							const htmlrewriter = new HTMLRewriter()

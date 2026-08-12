@@ -131,8 +131,11 @@ During development, the HMR system:
 
 - Watches for file changes in your pages directory
 - Automatically updates the client without full page reload
-- Maintains component state where possible
+- Uses React Fast Refresh to retain component and provider state when React marks the update boundary compatible
+- Preserves the identity of top-level exported contexts created with `createContext`, including aliased and namespace React imports, so layouts and pages continue to share the same provider after a route rebuild
 - Provides instant feedback via WebSocket connection
+
+Fast Refresh instrumentation is development-only. Context identity is stabilized for top-level exported contexts such as `export const ThemeContext = createContext(...)`; function-local or dynamically-created contexts retain normal React behavior. When a hook signature or refresh boundary is incompatible, React remounts the affected boundary rather than retaining stale state.
 
 ## Client-Side Router
 

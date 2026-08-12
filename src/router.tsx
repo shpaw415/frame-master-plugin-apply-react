@@ -17,7 +17,6 @@ import {
 import { requestDevRouteBuild, setupHMR } from "./HMR";
 import {
 	getRelatedLayoutEntriesFromPathname,
-	LayoutCache,
 	type LayoutEntry,
 	WrapWithLayouts,
 } from "./layout";
@@ -250,7 +249,7 @@ export function RouterHost({
 
 				return {
 					status: "ready",
-					Page: () => <Page />,
+					Page: Page as PageComponent,
 				};
 			} catch (error) {
 				if (HMR_ENABLED && isMissingRouteModuleError(error)) {
@@ -359,7 +358,7 @@ export function RouterHost({
 		});
 	}, []);
 
-	// HMR setup - listens for route changes from the HMR system and updates the route components in state without a full reload
+	// HMR setup - lets React Refresh reconcile an updated active route in place.
 	useEffect(
 		() =>
 			HMR_ENABLED
@@ -369,8 +368,7 @@ export function RouterHost({
 							if (!pendingRoute || pendingRoute.routeName !== routeName) return;
 							showBuildNotice(pathname);
 						},
-						onRoutesUpdate: (newRoutes) => {
-							LayoutCache.clear();
+						onRoutesUpdate: async (newRoutes) => {
 							const safeComponentLoader = () =>
 								newRoutes.component().catch((error) => {
 									console.error(
@@ -380,17 +378,24 @@ export function RouterHost({
 									window.location.reload();
 									throw error;
 								});
+							const activeRoute = router.match(window.location.pathname);
+							const pendingRoute = pendingDevRouteRef.current;
+							const isPendingRoute =
+								pendingRoute?.routeName === newRoutes.routeName;
+							const isActiveRoute = activeRoute?.name === newRoutes.routeName;
+
+							if (isActiveRoute) {
+								await safeComponentLoader();
+							}
+
 							setRoutes((curr) => {
 								const nextRoutes = {
 									...curr,
 									[newRoutes.routeName]: safeComponentLoader,
 								};
-								const pendingRoute = pendingDevRouteRef.current;
-								if (pendingRoute?.routeName === newRoutes.routeName) {
+								if (isPendingRoute && pendingRoute) {
 									pendingDevRouteRef.current = null;
 									setCurrentPage(pendingRoute.pathname, nextRoutes);
-								} else {
-									setCurrentPage(window.location.pathname, nextRoutes);
 								}
 
 								return nextRoutes;

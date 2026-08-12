@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { performReactRefresh } from "@apply-react/react-refresh-runtime.ts";
 
 let ws: WebSocket | undefined;
 
@@ -86,6 +87,16 @@ export function setupHMR(
 		onRouteBuildMissing,
 	}: SetupHMRCallbacks =
 		typeof callbacks === "function" ? { onRoutesUpdate: callbacks } : callbacks;
+	const createRouteComponentLoader = (route: string) => {
+		const routeUrl = `/@apply-react/routes/${route}?t=${Date.now()}`;
+		let componentPromise: Promise<() => JSX.Element> | undefined;
+
+		return () =>
+			(componentPromise ??= import(routeUrl).then((mod) => {
+				performReactRefresh();
+				return mod.default as () => JSX.Element;
+			}));
+	};
 	const handleMessage = async (event: MessageEvent) => {
 		let message: unknown;
 		try {
@@ -100,10 +111,7 @@ export function setupHMR(
 				await onRoutesUpdate({
 					pathname: message.pathname,
 					routeName: message.routeName,
-					component: () =>
-						import(
-							`/@apply-react/routes/${message.route}?t=${Date.now()}`
-						).then((mod) => mod.default as () => JSX.Element),
+					component: createRouteComponentLoader(message.route),
 				});
 				return;
 			}
