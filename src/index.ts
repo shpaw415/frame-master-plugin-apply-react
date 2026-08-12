@@ -227,6 +227,19 @@ async function collectFileDependencies(
 	return discovered;
 }
 
+const reactDedupePlugin: Bun.BunPlugin = {
+	name: "react-dedupe",
+	setup(build) {
+		const appNodeModules = resolve(process.cwd(), "./node_modules");
+		build.onResolve({ filter: /^react$/ }, () => ({
+			path: resolve(appNodeModules, "react/index.js"),
+		}));
+		build.onResolve({ filter: /^react\/jsx-runtime$/ }, () => ({
+			path: resolve(appNodeModules, "react/jsx-runtime.js"),
+		}));
+	},
+};
+
 /**
  * Configuration options for the Apply-React plugin
  */
@@ -640,8 +653,10 @@ export default function applyReactPluginToHTML(
 						...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 					],
 					splitting: true,
+					minify: isProd(),
 					files: virtualModulesList,
 					plugins: [
+						...(isProd() ? [] : [reactDedupePlugin]),
 						{
 							name: "apply-routes-to-hydrate",
 							setup(build) {

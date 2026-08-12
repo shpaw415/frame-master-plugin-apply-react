@@ -16,9 +16,6 @@ export default {
 			route: "src/pages",
 			style: "nextjs",
 			enableHMR: true,
-			"HMROptions": {
-				"moduleRoots": ["src/components"],
-			}
 		}) as FrameMasterPlugin,
 		ServeFromBuild({
 			buildDir: ".frame-master/build",
