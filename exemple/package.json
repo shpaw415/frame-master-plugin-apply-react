@@ -11,7 +11,7 @@
 	},
 	"dependencies": {
 		"frame-master": "^3.2.2",
-		"frame-master-plugin-apply-react": "..",
+		"frame-master-plugin-apply-react": "https://github.com/shpaw415/frame-master-plugin-apply-react.git#fix/hmr-behaviour",
 		"frame-master-plugin-serve-from-build": "^1.1.1",
 		"react": "19.2.8",
 		"react-dom": "19.2.8"

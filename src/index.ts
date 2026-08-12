@@ -127,6 +127,22 @@ function getBunLoader(filePath: string) {
 	}
 }
 
+export function shouldTransformReactRefreshModule(
+	projectRoot: string,
+	filePath: string,
+) {
+	if (!isWithinProject(projectRoot, filePath)) return false;
+
+	const relativePath = relative(projectRoot, filePath);
+	if (relativePath.split(/[\\/]/).includes("node_modules")) return false;
+
+	const extension = extname(filePath);
+	return (
+		TRACKED_SOURCE_EXTENSIONS.has(extension) &&
+		!NON_RECURSIVE_EXTENSIONS.has(extension)
+	);
+}
+
 function resolveImportSpecifier(
 	sourceFilePath: string,
 	specifier: string,
@@ -638,9 +654,7 @@ export default function applyReactPluginToHTML(
 									if (
 										!enableHMR ||
 										isProd() ||
-										!isWithinProject(cwd, args.path) ||
-										!TRACKED_SOURCE_EXTENSIONS.has(extname(args.path)) ||
-										NON_RECURSIVE_EXTENSIONS.has(extname(args.path))
+										!shouldTransformReactRefreshModule(cwd, args.path)
 									) {
 										return;
 									}

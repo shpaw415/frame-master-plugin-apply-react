@@ -3,6 +3,7 @@ import {
 	extractImportSpecifiers,
 	getRoutePathnameFromFileChange,
 	resolveWatchDirectories,
+	shouldTransformReactRefreshModule,
 } from "../src/index";
 import { createPluginTestEnv } from "frame-master/testing";
 
@@ -106,5 +107,28 @@ describe("resolveWatchDirectories", () => {
 				[" node_modules ", "", "node_modules"],
 			),
 		).toEqual(["src"]);
+	});
+});
+
+describe("shouldTransformReactRefreshModule", () => {
+	test("transforms application TSX but excludes node_modules dependencies", () => {
+		expect(
+			shouldTransformReactRefreshModule(
+				"/workspace/app",
+				"/workspace/app/src/pages/index.tsx",
+			),
+		).toBeTrue();
+		expect(
+			shouldTransformReactRefreshModule(
+				"/workspace/app",
+				"/workspace/app/node_modules/react-refresh/runtime.js",
+			),
+		).toBeFalse();
+		expect(
+			shouldTransformReactRefreshModule(
+				"/workspace/app",
+				"/workspace/app/src/styles.css",
+			),
+		).toBeFalse();
 	});
 });
