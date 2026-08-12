@@ -5,7 +5,7 @@ import ServeFromBuild from "frame-master-plugin-serve-from-build";
 
 export default {
 	HTTPServer: {
-		port: 3000,
+		port: process.env.PORT ?? 3000,
 	},
 	pluginsOptions: {
 		entrypoints: ["index.html"],
