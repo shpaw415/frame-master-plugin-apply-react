@@ -1,4 +1,5 @@
 import FAST_REFRESH_ENABLED from "@apply-react/fast-refresh-enabled.ts";
+import HMR_WEBSOCKET_PROTOCOL from "@apply-react/hmr-websocket-protocol.ts";
 import { performReactRefresh } from "@apply-react/react-refresh-runtime.ts";
 import type { JSX } from "react";
 
@@ -24,6 +25,16 @@ type SetupHMRCallbacks = {
 	onRouteBuildMissing?: (route: { pathname: string }) => Promise<void> | void;
 };
 
+export function resolveClientHmrWebsocketScheme(
+	protocol: "ws" | "wss" | "auto" = HMR_WEBSOCKET_PROTOCOL,
+	pageProtocol: string = typeof window !== "undefined"
+		? window.location.protocol
+		: "http:",
+): "ws" | "wss" {
+	if (protocol === "ws" || protocol === "wss") return protocol;
+	return pageProtocol === "https:" ? "wss" : "ws";
+}
+
 function initializeWebSocket() {
 	const WebSocketImpl = globalThis.WebSocket;
 	if (
@@ -33,7 +44,8 @@ function initializeWebSocket() {
 	) {
 		return;
 	}
-	ws = new WebSocketImpl(`ws://${window.location.host}/_REACT_HMR/ws`);
+	const scheme = resolveClientHmrWebsocketScheme();
+	ws = new WebSocketImpl(`${scheme}://${window.location.host}/_REACT_HMR/ws`);
 }
 
 function isRouteBuildStartedMessage(

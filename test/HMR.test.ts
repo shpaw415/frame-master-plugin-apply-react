@@ -3,8 +3,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 // RouterHMR (and other suites) may leave module mocks active; isolate this file.
 mock.restore();
 
-const { __resetHmrSocketForTests, requestDevRouteBuild, setupHMR } =
-	await import(`../src/HMR?hmr-unit=${Date.now()}`);
+const {
+	__resetHmrSocketForTests,
+	requestDevRouteBuild,
+	resolveClientHmrWebsocketScheme,
+	setupHMR,
+} = await import(`../src/HMR?hmr-unit=${Date.now()}`);
 
 class FakeWebSocket {
 	static instance: FakeWebSocket | null = null;
@@ -91,6 +95,11 @@ describe("setupHMR", () => {
 		const socket = FakeWebSocket.instance;
 		expect(socket).not.toBeNull();
 		expect(socket?.url).toBe("ws://localhost/_REACT_HMR/ws");
+
+		expect(resolveClientHmrWebsocketScheme("ws", "https:")).toBe("ws");
+		expect(resolveClientHmrWebsocketScheme("wss", "http:")).toBe("wss");
+		expect(resolveClientHmrWebsocketScheme("auto", "https:")).toBe("wss");
+		expect(resolveClientHmrWebsocketScheme("auto", "http:")).toBe("ws");
 
 		await socket?.emit({
 			type: "route-build-started",

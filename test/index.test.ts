@@ -3,6 +3,7 @@ import {
 	extractImportSpecifiers,
 	getRoutePathnameFromFileChange,
 	resolveFastRefreshEnabled,
+	resolveHmrWebsocketProtocol,
 	resolveWatchDirectories,
 	shouldTransformReactRefreshModule,
 } from "../src/index";
@@ -138,5 +139,14 @@ describe("resolveFastRefreshEnabled", () => {
 		expect(resolveFastRefreshEnabled(true, undefined)).toBeTrue();
 		expect(resolveFastRefreshEnabled(true, false)).toBeFalse();
 		expect(resolveFastRefreshEnabled(false, true)).toBeFalse();
+	});
+});
+
+describe("resolveHmrWebsocketProtocol", () => {
+	test("defaults to auto and accepts ws/wss", () => {
+		expect(resolveHmrWebsocketProtocol(undefined)).toBe("auto");
+		expect(resolveHmrWebsocketProtocol("ws")).toBe("ws");
+		expect(resolveHmrWebsocketProtocol("wss")).toBe("wss");
+		expect(resolveHmrWebsocketProtocol("auto")).toBe("auto");
 	});
 });

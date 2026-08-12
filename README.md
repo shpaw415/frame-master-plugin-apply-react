@@ -113,6 +113,7 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 | `clientShellPath`         | `string?`   | -                       | Optional path to a custom client-side shell component                    |
 | `enableHMR`               | `boolean`   | `true`                  | Enable Hot Module Replacement for development                            |
 | `enableFastRefresh`       | `boolean?`  | `enableHMR`             | Preserve compatible React state and shared context identity during HMR   |
+| `HMROptions.websocket`    | `"ws" \| "wss" \| "auto"?` | `"auto"`       | Client HMR socket scheme; `auto` uses `wss` on HTTPS pages (tunnels)     |
 | `watchDirectories`        | `string[]?` | `['.', 'node_modules']` | Directories watched for HMR file changes (project-root relative)         |
 | `watchDirectoriesExclude` | `string[]?` | -                       | Directories excluded from HMR watching; applied after `watchDirectories` |
 | `hydration`               | `"hydrate"` | `"hydrate"`             | Hydration method to use on the client                                    |

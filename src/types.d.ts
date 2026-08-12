@@ -19,6 +19,11 @@ declare module "@apply-react/fast-refresh-enabled.ts" {
 	export default FAST_REFRESH_ENABLED;
 }
 
+declare module "@apply-react/hmr-websocket-protocol.ts" {
+	const HMR_WEBSOCKET_PROTOCOL: "ws" | "wss" | "auto";
+	export default HMR_WEBSOCKET_PROTOCOL;
+}
+
 declare module "@apply-react/development-mode.ts" {
 	const IS_DEVELOPMENT: boolean;
 	export default IS_DEVELOPMENT;

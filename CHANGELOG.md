@@ -12,6 +12,7 @@
 - New plugin option `watchDirectoriesExclude` to exclude directories from HMR watching and override included watch directories.
 - Development-only React Fast Refresh for route rebuilds, with stable identity for top-level exported React contexts across rebuilt module graphs.
 - New `enableFastRefresh` option to opt out of React state/context preservation while retaining ordinary HMR route updates.
+- New `HMROptions.websocket` (`"ws" | "wss" | "auto"`, default `"auto"`) so the client HMR socket uses `wss` on HTTPS pages (Cloudflare tunnels) and avoids mixed-content blocks.
 - Recoverable RouterHost error fallback with development error details, custom `errorFallback`, and `onError` reporting APIs.
 
 ### Changed

@@ -51,6 +51,7 @@ const VirtualModules = [
 	"@apply-react/404.tsx",
 	"@apply-react/loading.tsx",
 	"@apply-react/fast-refresh-enabled.ts",
+	"@apply-react/hmr-websocket-protocol.ts",
 	"@apply-react/development-mode.ts",
 ] as const;
 
@@ -150,6 +151,17 @@ export function resolveFastRefreshEnabled(
 	enableFastRefresh: boolean | undefined,
 ) {
 	return enableHMR && (enableFastRefresh ?? enableHMR);
+}
+
+export type HmrWebsocketProtocol = "ws" | "wss" | "auto";
+
+export function resolveHmrWebsocketProtocol(
+	websocket: HmrWebsocketProtocol | undefined,
+): HmrWebsocketProtocol {
+	if (websocket === "ws" || websocket === "wss" || websocket === "auto") {
+		return websocket;
+	}
+	return "auto";
 }
 
 function resolveImportSpecifier(
@@ -264,6 +276,25 @@ export type ApplyReactPluginOptions = {
 	 * @default true
 	 */
 	enableHMR?: boolean;
+
+	/**
+	 * Client HMR transport options.
+	 */
+	HMROptions?: {
+		/**
+		 * WebSocket scheme used by the browser HMR client.
+		 *
+		 * - `"ws"` — always `ws://` (local http)
+		 * - `"wss"` — always `wss://` (HTTPS reverse proxies / tunnels)
+		 * - `"auto"` — `wss` when `location.protocol === "https:"`, else `ws`
+		 *
+		 * Use `"wss"` or `"auto"` behind HTTPS tunnels (e.g. Cloudflare) so mixed
+		 * content does not block the HMR socket.
+		 *
+		 * @default "auto"
+		 */
+		websocket?: "ws" | "wss" | "auto";
+	};
 
 	/**
 	 * Enable React Fast Refresh during development HMR updates.
@@ -401,6 +432,7 @@ export default function applyReactPluginToHTML(
 		style,
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
+		HMROptions = {},
 		enableFastRefresh,
 		watchDirectories,
 		watchDirectoriesExclude,
@@ -411,6 +443,9 @@ export default function applyReactPluginToHTML(
 	const fastRefreshEnabled = resolveFastRefreshEnabled(
 		enableHMR,
 		enableFastRefresh,
+	);
+	const hmrWebsocketProtocol = resolveHmrWebsocketProtocol(
+		HMROptions.websocket,
 	);
 	const cwd = process.cwd();
 
@@ -630,8 +665,9 @@ export default function applyReactPluginToHTML(
 					: "export function performReactRefresh() {}",
 			"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
 			"@apply-react/fast-refresh-enabled.ts": `const FAST_REFRESH_ENABLED = ${fastRefreshEnabled && !isProd()};export default FAST_REFRESH_ENABLED;`,
+			"@apply-react/hmr-websocket-protocol.ts": `const HMR_WEBSOCKET_PROTOCOL = ${JSON.stringify(hmrWebsocketProtocol)};export default HMR_WEBSOCKET_PROTOCOL;`,
 			"@apply-react/development-mode.ts": `const IS_DEVELOPMENT = ${!isProd()};export default IS_DEVELOPMENT;`,
-			"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, enableHMR, enableFastRefresh: fastRefreshEnabled, hydration, entrypointExtensions, fallbacks })}; export default props;`,
+			"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, enableHMR, enableFastRefresh: fastRefreshEnabled, HMROptions: { websocket: hmrWebsocketProtocol }, hydration, entrypointExtensions, fallbacks })}; export default props;`,
 			"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
 			"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
 		}) as Record<string, string>;

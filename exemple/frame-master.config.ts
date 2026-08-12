@@ -17,6 +17,10 @@ export default {
 			style: "nextjs",
 			enableHMR: true,
 			enableFastRefresh: true,
+			HMROptions: {
+				// auto: wss on https (dev.webcreas.com tunnel), ws on http localhost
+				websocket: "auto",
+			},
 		}) as FrameMasterPlugin,
 		ServeFromBuild({
 			buildDir: ".frame-master/build",
