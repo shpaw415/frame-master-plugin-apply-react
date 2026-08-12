@@ -611,96 +611,108 @@ export default function applyReactPluginToHTML(
 			void refreshDependencyGraph();
 		},
 		build: {
-			buildConfig: () => ({
-				entrypoints: [
-					...(isProd() ? [] : [...DevReactEntryPoints]),
-					...VirtualModules,
-					...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
-					...(HMROptions.moduleRoots?.flatMap(getModuleFromRootPath) ?? []),
-				],
-				splitting: true,
-				files: generateVirtualModulePathAndContent(),
-				plugins: [
-					{
-						name: "apply-routes-to-hydrate",
-						setup(build) {
-							build.onLoad({ filter: /.*/ }, async (args) => {
-								if (await directiveManager.pathIs("server-only", args.path)) {
+			buildConfig: () => {
+				const virtualModulesList = generateVirtualModulePathAndContent();
+
+				return {
+					entrypoints: [
+						...(isProd() ? [] : [...DevReactEntryPoints]),
+						...VirtualModules,
+						...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
+						...(HMROptions.moduleRoots?.flatMap(getModuleFromRootPath) ?? []),
+					],
+					splitting: true,
+					files: virtualModulesList,
+					plugins: [
+						{
+							name: "apply-routes-to-hydrate",
+							setup(build) {
+								build.onLoad({ filter: /.*/ }, async (args) => {
+									if (await directiveManager.pathIs("server-only", args.path)) {
+										return {
+											contents: "",
+											loader: "js",
+										};
+									}
+
+									if (
+										!enableHMR ||
+										isProd() ||
+										!isWithinProject(cwd, args.path) ||
+										!TRACKED_SOURCE_EXTENSIONS.has(extname(args.path)) ||
+										NON_RECURSIVE_EXTENSIONS.has(extname(args.path))
+									) {
+										return;
+									}
+
+									const contents =
+										args.__chainedContents ??
+										virtualModulesList[args.path] ??
+										(await Bun.file(args.path).text());
+									const moduleId = relative(cwd, args.path).replaceAll(
+										"\\",
+										"/",
+									);
 									return {
-										contents: "",
-										loader: "js",
-									};
-								}
-
-								if (
-									!enableHMR ||
-									isProd() ||
-									!isWithinProject(cwd, args.path) ||
-									!TRACKED_SOURCE_EXTENSIONS.has(extname(args.path)) ||
-									NON_RECURSIVE_EXTENSIONS.has(extname(args.path))
-								) {
-									return;
-								}
-
-								const contents =
-									args.__chainedContents ?? (await Bun.file(args.path).text());
-								const moduleId = relative(cwd, args.path).replaceAll("\\", "/");
-								return {
-									contents: await transformReactRefreshModule(
-										contents as string,
-										{
-											filename: args.path,
-											moduleId,
-										},
-									),
-									loader: getBunLoader(args.path),
-								};
-							});
-
-							const htmlrewriter = new HTMLRewriter()
-								.on("head", {
-									element(element) {
-										element.append(
-											`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
+										contents: await transformReactRefreshModule(
+											contents as string,
 											{
-												html: true,
+												filename: args.path,
+												moduleId,
 											},
-										);
-									},
-								})
-								.on("script#__hydrate_script__", {
-									element(element) {
-										element.remove();
-									},
+										),
+										loader: getBunLoader(args.path),
+									};
 								});
 
-							build.onLoad({ filter: /\.html$/ }, async (args) => {
-								const contents =
-									args.__chainedContents ?? (await Bun.file(args.path).text());
-								const transformed = htmlrewriter.transform(contents as string);
-								return {
-									contents: transformed,
-								};
-							});
+								const htmlrewriter = new HTMLRewriter()
+									.on("head", {
+										element(element) {
+											element.append(
+												`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
+												{
+													html: true,
+												},
+											);
+										},
+									})
+									.on("script#__hydrate_script__", {
+										element(element) {
+											element.remove();
+										},
+									});
 
-							build.finally("html", ({ contents, path }) => {
-								return {
-									contents: htmlrewriter.transform(contents as string),
-								};
-							});
-							build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
-								const realPath = join(
-									cwd,
-									args.path.replace("@apply-react/routes", route),
-								);
-								return {
-									path: realPath,
-								};
-							});
+								build.onLoad({ filter: /\.html$/ }, async (args) => {
+									const contents =
+										args.__chainedContents ??
+										(await Bun.file(args.path).text());
+									const transformed = htmlrewriter.transform(
+										contents as string,
+									);
+									return {
+										contents: transformed,
+									};
+								});
+
+								build.finally("html", ({ contents, path }) => {
+									return {
+										contents: htmlrewriter.transform(contents as string),
+									};
+								});
+								build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
+									const realPath = join(
+										cwd,
+										args.path.replace("@apply-react/routes", route),
+									);
+									return {
+										path: realPath,
+									};
+								});
+							},
 						},
-					},
-				],
-			}),
+					],
+				};
+			},
 			afterBuild() {
 				if (!pendingRouteUpdate) return;
 
