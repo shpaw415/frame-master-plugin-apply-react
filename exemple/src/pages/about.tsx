@@ -1,4 +1,4 @@
-import CustomComp from "../components/custom-comp";
+import { CustomComp } from "../components/custom-comp";
 
 export default function AboutPage() {
 	return (

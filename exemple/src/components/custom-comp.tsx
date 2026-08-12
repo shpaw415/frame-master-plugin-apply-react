@@ -1,7 +1,7 @@
 
 import { useState } from "react";
 
-export default function CustomComp() {
+export function CustomComp() {
     const [count, setCount] = useState(0);
     return (
         <div>

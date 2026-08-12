@@ -16,6 +16,10 @@ export default {
 			route: "src/pages",
 			style: "nextjs",
 			enableHMR: true,
+			enableFastRefresh: true,
+			HMROptions: {
+				"moduleRoots": [],
+			}
 		}) as FrameMasterPlugin,
 		ServeFromBuild({
 			buildDir: ".frame-master/build",
@@ -27,6 +31,11 @@ export default {
 			serverReady: async ({ builder }) => {
 				await builder.build();
 			},
+			"build": {
+				afterBuild: async () => {
+					console.log("Build completed!");
+				}
+			}
 		},
 	],
 } satisfies FrameMasterConfig;

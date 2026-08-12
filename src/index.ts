@@ -240,6 +240,17 @@ const reactDedupePlugin: Bun.BunPlugin = {
 	},
 };
 
+const moduleRootGlob = new Bun.Glob("**/*");
+function getModuleFromRootPath(root: string) {
+	return Array.from(
+		moduleRootGlob.scanSync({
+			absolute: true,
+			onlyFiles: true,
+			cwd: root,
+		}),
+	);
+}
+
 /**
  * Configuration options for the Apply-React plugin
  */
@@ -264,6 +275,9 @@ export type ApplyReactPluginOptions = {
 	 * @default true
 	 */
 	enableHMR?: boolean;
+	HMROptions?: {
+		moduleRoots?: Array<string>;
+	};
 
 	/**
 	 * Enable React Fast Refresh during development HMR updates.
@@ -401,6 +415,7 @@ export default function applyReactPluginToHTML(
 		style,
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
+		HMROptions = {},
 		enableFastRefresh,
 		watchDirectories,
 		watchDirectoriesExclude,
@@ -653,6 +668,11 @@ export default function applyReactPluginToHTML(
 						...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 					],
 					splitting: true,
+					naming: isProd()
+						? {
+								chunk: `chunk-[hash]-${Date.now()}.[ext]`,
+							}
+						: undefined,
 					minify: isProd(),
 					files: virtualModulesList,
 					plugins: [
