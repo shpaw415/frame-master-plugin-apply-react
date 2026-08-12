@@ -17,7 +17,7 @@ export default {
 			style: "nextjs",
 			enableHMR: true,
 			"HMROptions": {
-				"moduleRoots": ["src/pages"]
+				"moduleRoots": ["src/components"],
 			}
 		}) as FrameMasterPlugin,
 		ServeFromBuild({
@@ -29,9 +29,6 @@ export default {
 			version: "0.1.0",
 			serverReady: async ({ builder }) => {
 				await builder.build();
-				console.log("Builder build completed");
-				const hmrEnabled = await import("@apply-react/HMR-enabled.ts");
-				console.log("HMR enabled:", {hmrEnabled});
 			},
 		},
 	],

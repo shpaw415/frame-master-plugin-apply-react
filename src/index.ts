@@ -39,7 +39,7 @@ const DevReactEntryPoints = [
 	"node_modules/react/jsx-dev-runtime.js",
 	"node_modules/react/cjs/react.development.js",
 	"node_modules/react-dom/cjs/react-dom.development.js",
-];
+] as const;
 
 const VirtualModules = [
 	"@apply-react/client-routes.ts",
@@ -304,6 +304,17 @@ export function resolveWatchDirectories(
 	return resolvedDirectories;
 }
 
+const moduleRootGlob = new Bun.Glob("**/*");
+function getModuleFromRootPath(root: string) {
+	return Array.from(
+		moduleRootGlob.scanSync({
+			absolute: true,
+			onlyFiles: true,
+			cwd: root,
+		}),
+	);
+}
+
 /**
  * Apply React Plugin for Frame Master
  *
@@ -347,6 +358,7 @@ export default function applyReactPluginToHTML(
 		style,
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
+		HMROptions = {},
 		watchDirectories,
 		watchDirectoriesExclude,
 		entrypointExtensions = [".tsx", ".jsx"],
@@ -583,6 +595,7 @@ export default function applyReactPluginToHTML(
 					...(isProd() ? [] : [...DevReactEntryPoints]),
 					...VirtualModules,
 					...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
+					...(HMROptions.moduleRoots?.flatMap(getModuleFromRootPath) ?? []),
 				],
 				splitting: true,
 				files: generateVirtualModulePathAndContent(),
@@ -616,7 +629,16 @@ export default function applyReactPluginToHTML(
 									},
 								});
 
-							build.finally("html", ({ contents }) => {
+							build.onLoad({ filter: /\.html$/ }, async (args) => {
+								const contents =
+									args.__chainedContents ?? (await Bun.file(args.path).text());
+								const transformed = htmlrewriter.transform(contents as string);
+								return {
+									contents: transformed,
+								};
+							});
+
+							build.finally("html", ({ contents, path }) => {
 								return {
 									contents: htmlrewriter.transform(contents as string),
 								};
@@ -663,7 +685,6 @@ export default function applyReactPluginToHTML(
 						runtime.onLoad(
 							{ filter: escapeRegExp(path), namespace: "apply-react-virtual" },
 							async (args) => {
-								console.log(`[Apply-React] Loading virtual module: ${path}`);
 								return {
 									contents: content,
 									loader: path.split(".").pop() as "ts",

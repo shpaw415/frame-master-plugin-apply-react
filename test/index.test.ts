@@ -4,6 +4,7 @@ import {
 	getRoutePathnameFromFileChange,
 	resolveWatchDirectories,
 } from "../src/index";
+import { createPluginTestEnv } from "frame-master/testing";
 
 describe("getRoutePathnameFromFileChange", () => {
 	test("accepts file change paths relative to the project root", () => {
