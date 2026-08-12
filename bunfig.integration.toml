@@ -1,2 +1,0 @@
-[test]
-# No happy-dom preload — it breaks Bun.serve routes used by createPluginTestEnv.

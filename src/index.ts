@@ -701,14 +701,13 @@ export default function applyReactPluginToHTML(
 						...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 					],
 					splitting: true,
-					// Content hash alone is not enough for Fast Refresh: reverting a
-					// component to a previous body reuses the same chunk URL, so the
-					// browser ESM cache skips re-eval and $RefreshReg$ never runs.
-					// Stamp every build so HMR entry reloads always pull fresh shared
-					// chunks even when content hashes collide.
+					// Shared chunks must retain stable URLs. Replacing every chunk on
+					// HMR creates another React/Refresh runtime and breaks hooks.
 					naming: {
 						entry: "[dir]/[name].[ext]",
-						chunk: resolveChunkNamingPattern(),
+						chunk: isProd()
+							? resolveChunkNamingPattern()
+							: "chunk-[hash].[ext]",
 					},
 					minify: isProd(),
 					files: virtualModulesList,

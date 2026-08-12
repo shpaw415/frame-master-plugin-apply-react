@@ -2,9 +2,9 @@
  * Regression: Fast Refresh must update rendered text on every edit, including
  * reverting to a previous string ("page 1" → "page 2" → "page 1").
  *
- * Root cause covered by resolveChunkNamingPattern: pure chunk-[hash] names reuse
- * ESM URLs on content revert so $RefreshReg$ never re-runs. This test exercises
- * the refresh runtime path end-to-end (register + performReactRefresh).
+ * This test exercises the refresh runtime path end-to-end (register +
+ * performReactRefresh) while the browser workflow is covered manually against
+ * the example app.
  *
  * IMPORTANT: injectIntoGlobalHook must run before react-dom/client is imported.
  */
@@ -57,7 +57,7 @@ function makePage(text: string) {
 }
 
 describe("resolveChunkNamingPattern", () => {
-	test("stamps every build so identical content still gets a new chunk URL", () => {
+	test("creates a production cache-busting chunk pattern", () => {
 		const a = resolveChunkNamingPattern(1_700_000_000_000);
 		const b = resolveChunkNamingPattern(1_700_000_000_001);
 		expect(a).toBe("chunk-[hash]-1700000000000.[ext]");
