@@ -133,15 +133,32 @@ describe("RouterHost HMR", () => {
 		expect(input).not.toBeNull();
 		if (!input) throw new Error("Missing shared layout input");
 
-		await act(async () => {
-			setInputValue(input, "kept during HMR");
-			await flushNavigation();
-		});
+		const increment = document.querySelector(
+			'button[type="button"]',
+		) as HTMLButtonElement | null;
+		expect(increment).not.toBeNull();
+		if (!increment) throw new Error("Missing page increment control");
 
-		let componentLoads = 0;
+		const pageHeading = () =>
+			Array.from(document.querySelectorAll("h1")).find((node) =>
+				node.textContent?.startsWith("Main Page"),
+			);
+
 		const hotUpdate = onRoutesUpdate;
 		expect(hotUpdate).toBeDefined();
 		if (!hotUpdate) throw new Error("Missing HMR route update callback");
+
+		await act(async () => {
+			setInputValue(input, "kept during HMR");
+			increment.dispatchEvent(
+				new MouseEvent("click", { bubbles: true, cancelable: true }),
+			);
+			await flushNavigation();
+		});
+
+		expect(pageHeading()?.textContent).toBe("Main Page 1");
+
+		let componentLoads = 0;
 
 		await act(async () => {
 			await hotUpdate({
@@ -157,6 +174,8 @@ describe("RouterHost HMR", () => {
 
 		expect(componentLoads).toBe(1);
 		expect(getInput()?.value).toBe("kept during HMR");
+		// pageKey must not bump on Fast Refresh or page hooks reset
+		expect(pageHeading()?.textContent).toBe("Main Page 1");
 		expect(routeChangeCount).toBe(0);
 	});
 });

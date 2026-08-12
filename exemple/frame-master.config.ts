@@ -17,9 +17,6 @@ export default {
 			style: "nextjs",
 			enableHMR: true,
 			enableFastRefresh: true,
-			HMROptions: {
-				"moduleRoots": [],
-			}
 		}) as FrameMasterPlugin,
 		ServeFromBuild({
 			buildDir: ".frame-master/build",

@@ -547,8 +547,10 @@ export function RouterHost({
 							const isActiveRoute = activeRoute?.name === newRoutes.routeName;
 
 							if (FAST_REFRESH_ENABLED && isActiveRoute) {
+								// Re-import so $RefreshReg$ runs; performReactRefresh (in HMR)
+								// patches fibers in place. Do not bump pageKey — that remounts
+								// ErrorWrapper, keeps a stale CurrentPage, and wipes hook state.
 								await safeComponentLoader();
-								setPageKey((current) => current + 1);
 							}
 
 							setRoutes((curr) => {
