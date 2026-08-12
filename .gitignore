@@ -33,4 +33,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 frame-master-test.code-workspace
-.frame-master/build
+.frame-master/buildgoogle-chrome-stable_current_amd64.deb

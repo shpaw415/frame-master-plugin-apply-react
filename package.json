@@ -27,7 +27,9 @@
 		"start": "NODE_ENV=production bun frame-master start",
 		"build:dev": "NODE_ENV=development bun frame-master build",
 		"build": "NODE_ENV=production bun frame-master build",
-		"test": "bun test --tsconfig-override test/tsconfig.json test/",
+		"test": "bun test --tsconfig-override test/tsconfig.json test/*.test.ts test/*.test.tsx",
+		"test:unit": "bun test --tsconfig-override test/tsconfig.json test/*.test.ts test/*.test.tsx",
+		"test:integration": "bun test --config bunfig.integration.toml test/integration/",
 		"lint": "biome check",
 		"lint:write": "biome check --write"
 	},

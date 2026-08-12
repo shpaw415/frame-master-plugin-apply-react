@@ -62,6 +62,18 @@ const IMPORT_SPECIFIER_PATTERNS = [
 	/require\s*\(\s*["']([^"']+)["']\s*\)/g,
 ];
 
+/**
+ * Bun chunk filename pattern for apply-react builds.
+ * Always include a per-build stamp so HMR rebuilds never reuse a previous
+ * content-hash URL (reverting source would otherwise skip ESM re-eval and
+ * leave Fast Refresh with a stale component type).
+ */
+export function resolveChunkNamingPattern(
+	buildStamp: number = Date.now(),
+): string {
+	return `chunk-[hash]-${buildStamp}.[ext]`;
+}
+
 export function extractImportSpecifiers(source: string): string[] {
 	const specifiers = new Set<string>();
 
@@ -689,13 +701,14 @@ export default function applyReactPluginToHTML(
 						...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
 					],
 					splitting: true,
-					// Content-hashed chunks so HMR entry reloads (?t=) never pull a
-					// browser-cached shared chunk with stale component types.
+					// Content hash alone is not enough for Fast Refresh: reverting a
+					// component to a previous body reuses the same chunk URL, so the
+					// browser ESM cache skips re-eval and $RefreshReg$ never runs.
+					// Stamp every build so HMR entry reloads always pull fresh shared
+					// chunks even when content hashes collide.
 					naming: {
 						entry: "[dir]/[name].[ext]",
-						chunk: isProd()
-							? `chunk-[hash]-${Date.now()}.[ext]`
-							: "chunk-[hash].[ext]",
+						chunk: resolveChunkNamingPattern(),
 					},
 					minify: isProd(),
 					files: virtualModulesList,
@@ -885,8 +898,7 @@ export default function applyReactPluginToHTML(
 						pathname: matchedRoute.pathname,
 						matchedRoute,
 					});
-					void runQueuedDevBuilds();
-					return;
+					return runQueuedDevBuilds();
 				}
 			}
 
@@ -902,7 +914,7 @@ export default function applyReactPluginToHTML(
 				if (!target) continue;
 				scheduleDevRouteBuild(target);
 			}
-			void runQueuedDevBuilds();
+			return runQueuedDevBuilds();
 		},
 		router: {
 			async before_request(master) {
