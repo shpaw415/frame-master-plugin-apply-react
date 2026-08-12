@@ -26,7 +26,9 @@
 		"start": "NODE_ENV=production bun frame-master start",
 		"build:dev": "NODE_ENV=development bun frame-master build",
 		"build": "NODE_ENV=production bun frame-master build",
-		"test": "bun test --tsconfig-override test/tsconfig.json test/"
+		"test": "bun test --tsconfig-override test/tsconfig.json test/",
+		"lint": "biome check",
+		"lint:write": "biome check --write"
 	},
 	"dependencies": {
 		"@babel/core": "^8.0.1",

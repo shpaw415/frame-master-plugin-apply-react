@@ -60,13 +60,20 @@ describe("ErrorWrapper.render", () => {
 		expect(result.type).toBe(FallbackPage);
 	});
 
-	test("returns null when error is set but FallbackComponent not yet resolved", () => {
+	test("renders the built-in fallback while resolver selection is pending", () => {
 		const instance = new ErrorWrapper({
 			children: createElement(Child, null),
 			resolvers: [],
 		});
-		instance.state = { error: new Error("test"), FallbackComponent: null };
-		expect(instance.render()).toBeNull();
+		instance.state = {
+			error: new Error("test"),
+			FallbackComponent: null,
+			componentStack: null,
+		};
+
+		const result = instance.render() as JSX.Element;
+		expect(result).not.toBeNull();
+		expect(result.type).not.toBe("div");
 	});
 
 	test("renders children to HTML string when no error", () => {
@@ -101,10 +108,10 @@ describe("ErrorWrapper.componentDidCatch", () => {
 
 		await instance.componentDidCatch(new Error("boom"));
 
-		expect(setStateSpy).toHaveBeenCalledTimes(1);
-		expect(setStateSpy.mock.calls.at(0)?.at(0)).toEqual({
+		expect(setStateSpy).toHaveBeenCalledTimes(2);
+		expect(setStateSpy.mock.calls.at(-1)?.at(0)).toEqual({
 			FallbackComponent: FallbackPage,
-		} as unknown as any);
+		});
 		// Stops at first match – second resolver must NOT be invoked
 		expect(resolverB).not.toHaveBeenCalled();
 	});
@@ -127,7 +134,7 @@ describe("ErrorWrapper.componentDidCatch", () => {
 		});
 	});
 
-	test("does not call setState when no resolver matches", async () => {
+	test("stores component metadata when no resolver matches", async () => {
 		const instance = new ErrorWrapper({
 			children: createElement(Child, null),
 			resolvers: [async () => null, async () => null],
@@ -137,7 +144,7 @@ describe("ErrorWrapper.componentDidCatch", () => {
 
 		await instance.componentDidCatch(new Error("no match"));
 
-		expect(setStateSpy).not.toHaveBeenCalled();
+		expect(setStateSpy).toHaveBeenCalledWith({ componentStack: null });
 	});
 
 	test("passes the thrown error and current pathname to each resolver", async () => {
@@ -208,6 +215,68 @@ describe("ErrorWrapper.componentDidCatch", () => {
 		expect(catchAllResolver).toHaveBeenCalled();
 		expect(setStateSpy).toHaveBeenCalledWith({
 			FallbackComponent: FallbackPage,
+		});
+	});
+
+	test("reports error details and uses the custom fallback after resolvers", async () => {
+		const onError = mock(() => {});
+		const CustomFallback = ({ pathname }: { pathname: string }) =>
+			createElement("div", null, `Fallback for ${pathname}`);
+		const instance = new ErrorWrapper({
+			children: createElement(Child, null),
+			resolvers: [async () => null],
+			onError,
+			errorFallback: CustomFallback,
+		});
+		const setStateSpy = mock(() => {});
+		instance.setState = setStateSpy as unknown as typeof instance.setState;
+
+		await instance.componentDidCatch(new Error("boom"), {
+			componentStack: "\n    at Child",
+		});
+
+		expect(onError).toHaveBeenCalledWith(new Error("boom"), {
+			pathname: "/",
+			componentStack: "\n    at Child",
+		});
+		expect(setStateSpy).toHaveBeenCalledTimes(2);
+		const fallbackState = setStateSpy.mock.calls.at(-1)?.at(0) as {
+			FallbackComponent: () => JSX.Element;
+		};
+		expect(fallbackState.FallbackComponent().type).toBe(CustomFallback);
+	});
+
+	test("keeps a matching resolver ahead of the custom fallback", async () => {
+		const CustomFallback = () => createElement("div", null, "Custom");
+		const instance = new ErrorWrapper({
+			children: createElement(Child, null),
+			resolvers: [async () => FallbackPage],
+			errorFallback: CustomFallback,
+		});
+		const setStateSpy = mock(() => {});
+		instance.setState = setStateSpy as unknown as typeof instance.setState;
+
+		await instance.componentDidCatch(new Error("boom"));
+
+		expect(setStateSpy.mock.calls.at(-1)?.at(0)).toEqual({
+			FallbackComponent: FallbackPage,
+		});
+	});
+
+	test("reset clears the captured error state", () => {
+		const instance = new ErrorWrapper({
+			children: createElement(Child, null),
+			resolvers: [],
+		});
+		const setStateSpy = mock(() => {});
+		instance.setState = setStateSpy as unknown as typeof instance.setState;
+
+		instance.reset();
+
+		expect(setStateSpy).toHaveBeenCalledWith({
+			error: null,
+			FallbackComponent: null,
+			componentStack: null,
 		});
 	});
 });

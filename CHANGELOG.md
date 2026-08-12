@@ -11,6 +11,8 @@
 - New plugin option `watchDirectories` to control which directories are watched for HMR changes.
 - New plugin option `watchDirectoriesExclude` to exclude directories from HMR watching and override included watch directories.
 - Development-only React Fast Refresh for route rebuilds, with stable identity for top-level exported React contexts across rebuilt module graphs.
+- New `enableFastRefresh` option to opt out of React state/context preservation while retaining ordinary HMR route updates.
+- Recoverable RouterHost error fallback with development error details, custom `errorFallback`, and `onError` reporting APIs.
 
 ### Changed
 

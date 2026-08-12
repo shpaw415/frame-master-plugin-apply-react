@@ -1,5 +1,7 @@
 import FallbackDefault404 from "@apply-react/404.tsx";
 import _ROUTES_ from "@apply-react/client-routes.ts";
+import IS_DEVELOPMENT from "@apply-react/development-mode.ts";
+import FAST_REFRESH_ENABLED from "@apply-react/fast-refresh-enabled.ts";
 import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
 import FallbackDefaultLoading from "@apply-react/loading.tsx";
 import {
@@ -8,6 +10,7 @@ import {
 } from "bun-file-system-router-browser";
 import {
 	Component,
+	type ErrorInfo,
 	type JSX,
 	useCallback,
 	useEffect,
@@ -17,6 +20,7 @@ import {
 import { requestDevRouteBuild, setupHMR } from "./HMR";
 import {
 	getRelatedLayoutEntriesFromPathname,
+	LayoutCache,
 	type LayoutEntry,
 	WrapWithLayouts,
 } from "./layout";
@@ -36,6 +40,22 @@ export type ErrorFallbackResolver = (
 	pathname: string,
 	Layouts: (props: { children: JSX.Element }) => JSX.Element | null,
 ) => Promise<(() => JSX.Element) | null>;
+
+export type RouterErrorFallbackProps = {
+	error: Error;
+	componentStack: string | null;
+	pathname: string;
+	reset: () => void;
+};
+
+export type RouterErrorFallback = (
+	props: RouterErrorFallbackProps,
+) => JSX.Element | null;
+
+export type RouterErrorContext = {
+	pathname: string;
+	componentStack: string | null;
+};
 
 export const defaultErrorResolvers: ErrorFallbackResolver[] = [
 	async (error, pathname, Layouts) => {
@@ -98,11 +118,14 @@ export function setInitialRouteSnapshot(snapshot: InitialRouteSnapshot | null) {
 interface ErrorWrapperProps {
 	children: JSX.Element;
 	resolvers: ErrorFallbackResolver[];
+	errorFallback?: RouterErrorFallback;
+	onError?: (error: Error, context: RouterErrorContext) => void;
 }
 
 interface ErrorWrapperState {
 	error: Error | null;
 	FallbackComponent: (() => JSX.Element) | null;
+	componentStack: string | null;
 }
 
 /**
@@ -114,14 +137,38 @@ export class ErrorWrapper extends Component<
 	ErrorWrapperProps,
 	ErrorWrapperState
 > {
-	override state: ErrorWrapperState = { error: null, FallbackComponent: null };
+	override state: ErrorWrapperState = {
+		error: null,
+		FallbackComponent: null,
+		componentStack: null,
+	};
 
 	static getDerivedStateFromError(error: Error): Partial<ErrorWrapperState> {
-		return { error };
+		return { error, FallbackComponent: null, componentStack: null };
 	}
 
-	override async componentDidCatch(error: Error) {
+	reset = () => {
+		this.setState({
+			error: null,
+			FallbackComponent: null,
+			componentStack: null,
+		});
+	};
+
+	override async componentDidCatch(error: Error, errorInfo?: ErrorInfo) {
 		const pathname = globalThis?.location?.pathname ?? "/";
+		const context = {
+			pathname,
+			componentStack: errorInfo?.componentStack ?? null,
+		};
+		this.setState({ componentStack: context.componentStack });
+
+		try {
+			this.props.onError?.(error, context);
+		} catch (reportError) {
+			console.error("[Apply-React] Router error reporter failed", reportError);
+		}
+
 		for (const resolver of this.props.resolvers) {
 			const fallback = await resolver(
 				error,
@@ -133,6 +180,20 @@ export class ErrorWrapper extends Component<
 				return;
 			}
 		}
+
+		if (this.props.errorFallback) {
+			const ErrorFallback = this.props.errorFallback;
+			this.setState({
+				FallbackComponent: () => (
+					<ErrorFallback
+						error={error}
+						componentStack={context.componentStack}
+						pathname={pathname}
+						reset={this.reset}
+					/>
+				),
+			});
+		}
 	}
 
 	override render() {
@@ -141,16 +202,115 @@ export class ErrorWrapper extends Component<
 				const Fallback = this.state.FallbackComponent;
 				return <Fallback />;
 			}
-			return null;
+			return (
+				<DefaultRouterErrorFallback
+					error={this.state.error}
+					componentStack={this.state.componentStack}
+					pathname={globalThis?.location?.pathname ?? "/"}
+					reset={this.reset}
+				/>
+			);
 		}
 		return this.props.children;
 	}
+}
+
+function DefaultRouterErrorFallback({
+	error,
+	componentStack,
+	pathname,
+	reset,
+}: RouterErrorFallbackProps) {
+	const showDetails = IS_DEVELOPMENT;
+	const details = [
+		`${error.name}: ${error.message}`,
+		`Pathname: ${pathname}`,
+		componentStack ?? error.stack ?? "",
+	]
+		.filter(Boolean)
+		.join("\n\n");
+
+	const copyDetails = () => {
+		void navigator.clipboard?.writeText(details);
+	};
+
+	return (
+		<div
+			role="alert"
+			style={{
+				position: "fixed",
+				inset: 0,
+				zIndex: 9999,
+				display: "grid",
+				placeItems: "center",
+				padding: "1.5rem",
+				background: "rgba(12, 14, 18, 0.9)",
+				color: "#f8fafc",
+				fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+			}}
+		>
+			<section
+				style={{
+					width: "min(48rem, 100%)",
+					maxHeight: "calc(100vh - 3rem)",
+					overflow: "auto",
+					border: "1px solid rgba(248, 113, 113, 0.55)",
+					borderRadius: "6px",
+					background: "#17191f",
+					boxShadow: "0 20px 60px rgba(0, 0, 0, 0.45)",
+					padding: "1.25rem",
+				}}
+			>
+				<h1 style={{ margin: 0, fontSize: "1.05rem" }}>
+					{showDetails ? "Route render failed" : "Something went wrong"}
+				</h1>
+				{showDetails ? (
+					<>
+						<p style={{ color: "#fca5a5", margin: "0.75rem 0" }}>
+							{error.message}
+						</p>
+						<details>
+							<summary>Error details</summary>
+							<pre
+								style={{
+									whiteSpace: "pre-wrap",
+									wordBreak: "break-word",
+									fontSize: "0.75rem",
+								}}
+							>
+								{details}
+							</pre>
+						</details>
+					</>
+				) : (
+					<p>Try again or reload the page.</p>
+				)}
+				<div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+					<button type="button" onClick={reset}>
+						Retry
+					</button>
+					<button type="button" onClick={() => window.location.reload()}>
+						Reload
+					</button>
+					{showDetails ? (
+						<button type="button" onClick={copyDetails}>
+							Copy details
+						</button>
+					) : null}
+				</div>
+			</section>
+		</div>
+	);
 }
 
 export type RouterHostProps = {
 	children: JSX.Element;
 	/** Override or extend the error-to-fallback-page resolver chain. */
 	errorResolvers?: ErrorFallbackResolver[];
+	/** Rendered after no error resolver handles a thrown route error. */
+	errorFallback?: RouterErrorFallback;
+	/** Called with route error details for logging or error reporting. */
+	onError?: (error: Error, context: RouterErrorContext) => void;
 	/** Callback invoked on every route change. */
 	onRouteChange?: (route: MatchedRoute) => void | Promise<void>;
 	/** Custom component rendered while a dev-only route build is pending. */
@@ -173,6 +333,8 @@ export type RouterHostProps = {
 export function RouterHost({
 	children,
 	errorResolvers = defaultErrorResolvers,
+	errorFallback,
+	onError,
 	onRouteChange,
 	buildNotifier: BuildNotifier = DefaultBuildNotifier,
 }: RouterHostProps) {
@@ -358,7 +520,7 @@ export function RouterHost({
 		});
 	}, []);
 
-	// HMR setup - lets React Refresh reconcile an updated active route in place.
+	// HMR setup - uses React Refresh when enabled, otherwise replaces the route.
 	useEffect(
 		() =>
 			HMR_ENABLED
@@ -384,8 +546,9 @@ export function RouterHost({
 								pendingRoute?.routeName === newRoutes.routeName;
 							const isActiveRoute = activeRoute?.name === newRoutes.routeName;
 
-							if (isActiveRoute) {
+							if (FAST_REFRESH_ENABLED && isActiveRoute) {
 								await safeComponentLoader();
+								setPageKey((current) => current + 1);
 							}
 
 							setRoutes((curr) => {
@@ -396,6 +559,9 @@ export function RouterHost({
 								if (isPendingRoute && pendingRoute) {
 									pendingDevRouteRef.current = null;
 									setCurrentPage(pendingRoute.pathname, nextRoutes);
+								} else if (!FAST_REFRESH_ENABLED) {
+									LayoutCache.clear();
+									setCurrentPage(window.location.pathname, nextRoutes);
 								}
 
 								return nextRoutes;
@@ -512,7 +678,12 @@ export function RouterHost({
 	return (
 		<>
 			<WrapWithLayouts layouts={activeLayouts}>
-				<ErrorWrapper key={pageKey} resolvers={errorResolvers}>
+				<ErrorWrapper
+					key={pageKey}
+					resolvers={errorResolvers}
+					errorFallback={errorFallback}
+					onError={onError}
+				>
 					<CurrentPage />
 				</ErrorWrapper>
 			</WrapWithLayouts>

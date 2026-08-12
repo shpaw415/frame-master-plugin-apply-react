@@ -50,6 +50,8 @@ const VirtualModules = [
 	"@apply-react/client-shell.tsx",
 	"@apply-react/404.tsx",
 	"@apply-react/loading.tsx",
+	"@apply-react/fast-refresh-enabled.ts",
+	"@apply-react/development-mode.ts",
 ] as const;
 
 const IMPORT_SPECIFIER_PATTERNS = [
@@ -141,6 +143,13 @@ export function shouldTransformReactRefreshModule(
 		TRACKED_SOURCE_EXTENSIONS.has(extension) &&
 		!NON_RECURSIVE_EXTENSIONS.has(extension)
 	);
+}
+
+export function resolveFastRefreshEnabled(
+	enableHMR: boolean,
+	enableFastRefresh: boolean | undefined,
+) {
+	return enableHMR && (enableFastRefresh ?? enableHMR);
 }
 
 function resolveImportSpecifier(
@@ -242,18 +251,16 @@ export type ApplyReactPluginOptions = {
 	 * @default true
 	 */
 	enableHMR?: boolean;
+
 	/**
-	 * Options for configuring Hot Module Replacement (HMR)
+	 * Enable React Fast Refresh during development HMR updates.
 	 *
-	 * @default {}
+	 * When enabled, compatible component and provider state is retained and
+	 * top-level exported React contexts preserve their identity across updates.
+	 *
+	 * @default Same value as `enableHMR`
 	 */
-	HMROptions?: {
-		/* Optional array of module roots for HMR
-		 * If provided, HMR will create entrypoints for the specified module roots files.
-		 * Relative paths are resolved from the project root.
-		 */
-		moduleRoots?: string[];
-	};
+	enableFastRefresh?: boolean;
 
 	/**
 	 * Directories to watch for HMR file changes.
@@ -337,17 +344,6 @@ export function resolveWatchDirectories(
 	return resolvedDirectories;
 }
 
-const moduleRootGlob = new Bun.Glob("**/*");
-function getModuleFromRootPath(root: string) {
-	return Array.from(
-		moduleRootGlob.scanSync({
-			absolute: true,
-			onlyFiles: true,
-			cwd: root,
-		}),
-	);
-}
-
 /**
  * Apply React Plugin for Frame Master
  *
@@ -369,6 +365,7 @@ function getModuleFromRootPath(root: string) {
  * @param props.route - Base path for route files (e.g., "src/pages")
  * @param props.clientShellPath - Optional custom shell for client-side hydration
  * @param props.enableHMR - Enable Hot Module Replacement (default: true on dev & false on prod)
+ * @param props.enableFastRefresh - Preserve compatible React state during HMR (default: follows enableHMR)
  *
  * @returns Frame Master plugin instance with React integration
  *
@@ -391,13 +388,17 @@ export default function applyReactPluginToHTML(
 		style,
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
-		HMROptions = {},
+		enableFastRefresh,
 		watchDirectories,
 		watchDirectoriesExclude,
 		entrypointExtensions = [".tsx", ".jsx"],
 		fallbacks = {},
 		hydration = "hydrate",
 	} = props;
+	const fastRefreshEnabled = resolveFastRefreshEnabled(
+		enableHMR,
+		enableFastRefresh,
+	);
 	const cwd = process.cwd();
 
 	const pathToClientShell = props.clientShellPath
@@ -611,11 +612,13 @@ export default function applyReactPluginToHTML(
 			// HMR modules
 			"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
 			"@apply-react/react-refresh-runtime.ts":
-				enableHMR && !isProd()
+				fastRefreshEnabled && !isProd()
 					? `export * from "${join(__dirname, "react-refresh-runtime.ts")}";`
 					: "export function performReactRefresh() {}",
 			"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
-			"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, hydration, entrypointExtensions, fallbacks })}; export default props;`,
+			"@apply-react/fast-refresh-enabled.ts": `const FAST_REFRESH_ENABLED = ${fastRefreshEnabled && !isProd()};export default FAST_REFRESH_ENABLED;`,
+			"@apply-react/development-mode.ts": `const IS_DEVELOPMENT = ${!isProd()};export default IS_DEVELOPMENT;`,
+			"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, enableHMR, enableFastRefresh: fastRefreshEnabled, hydration, entrypointExtensions, fallbacks })}; export default props;`,
 			"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
 			"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
 		}) as Record<string, string>;
@@ -635,7 +638,6 @@ export default function applyReactPluginToHTML(
 						...(isProd() ? [] : [...DevReactEntryPoints]),
 						...VirtualModules,
 						...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
-						...(HMROptions.moduleRoots?.flatMap(getModuleFromRootPath) ?? []),
 					],
 					splitting: true,
 					files: virtualModulesList,
@@ -652,7 +654,7 @@ export default function applyReactPluginToHTML(
 									}
 
 									if (
-										!enableHMR ||
+										!fastRefreshEnabled ||
 										isProd() ||
 										!shouldTransformReactRefreshModule(cwd, args.path)
 									) {
@@ -708,7 +710,7 @@ export default function applyReactPluginToHTML(
 									};
 								});
 
-								build.finally("html", ({ contents, path }) => {
+								build.finally("html", ({ contents }) => {
 									return {
 										contents: htmlrewriter.transform(contents as string),
 									};
@@ -747,7 +749,7 @@ export default function applyReactPluginToHTML(
 					const virtualModules = generateVirtualModulePathAndContent();
 
 					Object.entries(virtualModules).forEach(([path, content]) => {
-						runtime.onResolve({ filter: escapeRegExp(path) }, (args) => {
+						runtime.onResolve({ filter: escapeRegExp(path) }, (_args) => {
 							return {
 								path,
 								namespace: "apply-react-virtual",
@@ -755,7 +757,7 @@ export default function applyReactPluginToHTML(
 						});
 						runtime.onLoad(
 							{ filter: escapeRegExp(path), namespace: "apply-react-virtual" },
-							async (args) => {
+							async (_args) => {
 								return {
 									contents: content,
 									loader: path.split(".").pop() as "ts",

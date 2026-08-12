@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	extractImportSpecifiers,
 	getRoutePathnameFromFileChange,
+	resolveFastRefreshEnabled,
 	resolveWatchDirectories,
 	shouldTransformReactRefreshModule,
 } from "../src/index";
-import { createPluginTestEnv } from "frame-master/testing";
 
 describe("getRoutePathnameFromFileChange", () => {
 	test("accepts file change paths relative to the project root", () => {
@@ -130,5 +130,13 @@ describe("shouldTransformReactRefreshModule", () => {
 				"/workspace/app/src/styles.css",
 			),
 		).toBeFalse();
+	});
+});
+
+describe("resolveFastRefreshEnabled", () => {
+	test("defaults to HMR and can be explicitly disabled", () => {
+		expect(resolveFastRefreshEnabled(true, undefined)).toBeTrue();
+		expect(resolveFastRefreshEnabled(true, false)).toBeFalse();
+		expect(resolveFastRefreshEnabled(false, true)).toBeFalse();
 	});
 });

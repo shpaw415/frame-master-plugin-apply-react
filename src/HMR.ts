@@ -1,5 +1,6 @@
-import type { JSX } from "react";
+import FAST_REFRESH_ENABLED from "@apply-react/fast-refresh-enabled.ts";
 import { performReactRefresh } from "@apply-react/react-refresh-runtime.ts";
+import type { JSX } from "react";
 
 let ws: WebSocket | undefined;
 
@@ -93,7 +94,7 @@ export function setupHMR(
 
 		return () =>
 			(componentPromise ??= import(routeUrl).then((mod) => {
-				performReactRefresh();
+				if (FAST_REFRESH_ENABLED) performReactRefresh();
 				return mod.default as () => JSX.Element;
 			}));
 	};

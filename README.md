@@ -112,6 +112,7 @@ export default function MainLayout({ children }: { children: JSX.Element }) {
 | `route`                   | `string`    | -                       | Base path to your routes directory                                       |
 | `clientShellPath`         | `string?`   | -                       | Optional path to a custom client-side shell component                    |
 | `enableHMR`               | `boolean`   | `true`                  | Enable Hot Module Replacement for development                            |
+| `enableFastRefresh`       | `boolean?`  | `enableHMR`             | Preserve compatible React state and shared context identity during HMR   |
 | `watchDirectories`        | `string[]?` | `['.', 'node_modules']` | Directories watched for HMR file changes (project-root relative)         |
 | `watchDirectoriesExclude` | `string[]?` | -                       | Directories excluded from HMR watching; applied after `watchDirectories` |
 | `hydration`               | `"hydrate"` | `"hydrate"`             | Hydration method to use on the client                                    |
@@ -211,7 +212,41 @@ export default function ClientShell({ children }: { children: JSX.Element }) {
 }
 ```
 
-If no resolver matches the thrown error, the boundary renders `null` (blank page). The `ErrorWrapper` is automatically reset on every navigation so stale error state never leaks between pages.
+If no resolver matches, `RouterHost` renders a recoverable built-in fallback. In development it includes the message, component stack, current pathname, and retry/reload/copy actions. Production uses a generic fallback without error details. The boundary resets on navigation and after a successful Fast Refresh update.
+
+### Custom Fallbacks And Reporting
+
+Use `errorFallback` to replace the built-in fallback, and `onError` to send error details to your logging service. Typed `errorResolvers` always take precedence over `errorFallback`.
+
+```tsx
+import {
+  RouterHost,
+  type RouterErrorFallbackProps,
+} from "frame-master-plugin-apply-react/router";
+
+function AppError({ error, reset }: RouterErrorFallbackProps) {
+  return (
+    <main>
+      <h1>We could not load this page</h1>
+      <p>{error.message}</p>
+      <button type="button" onClick={reset}>Try again</button>
+    </main>
+  );
+}
+
+export default function ClientShell({ children }: { children: JSX.Element }) {
+  return (
+    <RouterHost
+      errorFallback={AppError}
+      onError={(error, { pathname, componentStack }) => {
+        reportRouteError({ error, pathname, componentStack });
+      }}
+    >
+      {children}
+    </RouterHost>
+  );
+}
+```
 
 ### `ErrorFallbackResolver` type
 
@@ -220,6 +255,15 @@ type ErrorFallbackResolver = (
   error: Error,
   pathname: string,
 ) => Promise<(() => JSX.Element) | null>;
+```
+
+```ts
+type RouterErrorFallbackProps = {
+  error: Error;
+  componentStack: string | null;
+  pathname: string;
+  reset: () => void;
+};
 ```
 
 ## Server-Only Modules

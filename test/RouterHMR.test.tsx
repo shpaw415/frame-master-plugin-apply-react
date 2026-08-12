@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import routes from "@apply-react/client-routes.ts";
+import type { JSX } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { JSX } from "react";
-import routes from "@apply-react/client-routes.ts";
 import {
 	getRelatedLayoutEntriesFromPathname,
 	LayoutCache,
@@ -35,7 +35,13 @@ mock.module("@apply-react/HMR-enabled.ts", () => ({
 	default: true,
 }));
 
-const { RouterHost, setInitialRouteSnapshot } = await import("../src/router");
+mock.module("@apply-react/fast-refresh-enabled.ts", () => ({
+	default: true,
+}));
+
+const { RouterHost, setInitialRouteSnapshot } = await import(
+	"../src/router?router-hmr-test"
+);
 
 function flushNavigation() {
 	return new Promise((resolve) => setTimeout(resolve, 0));
