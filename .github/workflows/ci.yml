@@ -17,6 +17,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
+      - name: Force LF line endings
+        run: git config core.autocrlf false && git config core.eol lf && git checkout -- .
+        shell: bash
       - uses: oven-sh/setup-bun@v2.2.0
       - run: bun install --frozen-lockfile
       - run: bun run lint
@@ -30,6 +33,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
+      - name: Force LF line endings
+        run: git config core.autocrlf false && git config core.eol lf && git checkout -- .
+        shell: bash
       - uses: oven-sh/setup-bun@v2.2.0
       - run: bun install --frozen-lockfile
       - run: bun run test

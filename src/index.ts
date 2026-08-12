@@ -901,7 +901,7 @@ export function getRoutePathnameFromFileChange(
 	changedPath: string,
 ) {
 	const normalizedPath = resolve(projectRoot, changedPath);
-	const relativePath = relative(routeDir, normalizedPath);
+	const relativePath = relative(routeDir, normalizedPath).replaceAll("\\", "/");
 
 	if (
 		!relativePath ||
@@ -915,8 +915,8 @@ export function getRoutePathnameFromFileChange(
 }
 
 function filePathToPathname(fp: string) {
-	let fpNoExt = fp.replace(/\.(tsx|jsx)$/, "");
-	if (fpNoExt.endsWith("index")) {
+	let fpNoExt = fp.replaceAll("\\", "/").replace(/\.(tsx|jsx)$/, "");
+	if (fpNoExt.endsWith("/index") || fpNoExt === "index") {
 		fpNoExt = fpNoExt.slice(0, -"/index".length) || "/";
 	}
 	return fpNoExt.startsWith("/") ? fpNoExt : `/${fpNoExt}`;
