@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	mock,
+	test,
+} from "bun:test";
 import routes from "@apply-react/client-routes.ts";
 import type { JSX } from "react";
 import { act } from "react";
@@ -17,7 +25,13 @@ type RouteUpdate = {
 
 let onRoutesUpdate: ((route: RouteUpdate) => Promise<void> | void) | undefined;
 
-mock.module("../src/HMR", () => ({
+const hmrEnabledModule = import.meta.resolve("@apply-react/HMR-enabled.ts");
+const fastRefreshModule = import.meta.resolve(
+	"@apply-react/fast-refresh-enabled.ts",
+);
+const hmrModule = import.meta.resolve("../src/HMR.ts");
+
+mock.module(hmrModule, () => ({
 	requestDevRouteBuild: async () => ({ status: "missing", pathname: "/" }),
 	setupHMR: ({
 		onRoutesUpdate: callback,
@@ -31,16 +45,16 @@ mock.module("../src/HMR", () => ({
 	},
 }));
 
-mock.module("@apply-react/HMR-enabled.ts", () => ({
+mock.module(hmrEnabledModule, () => ({
 	default: true,
 }));
 
-mock.module("@apply-react/fast-refresh-enabled.ts", () => ({
+mock.module(fastRefreshModule, () => ({
 	default: true,
 }));
 
 const { RouterHost, setInitialRouteSnapshot } = await import(
-	"../src/router?router-hmr-test"
+	`../src/router?router-hmr-test=${Date.now()}`
 );
 
 function flushNavigation() {
@@ -68,6 +82,10 @@ describe("RouterHost HMR", () => {
 	let root: Root | undefined;
 	let container: HTMLDivElement;
 	let routeChangeCount: number;
+
+	afterAll(() => {
+		mock.restore();
+	});
 
 	beforeEach(async () => {
 		LayoutCache.clear();

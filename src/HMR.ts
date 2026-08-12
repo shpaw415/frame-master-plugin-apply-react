@@ -4,6 +4,11 @@ import type { JSX } from "react";
 
 let ws: WebSocket | undefined;
 
+/** Test-only helper to drop the shared client socket between unit tests. */
+export function __resetHmrSocketForTests() {
+	ws = undefined;
+}
+
 type RouteUpdatePayload = {
 	pathname: string;
 	routeName: string;
@@ -20,14 +25,15 @@ type SetupHMRCallbacks = {
 };
 
 function initializeWebSocket() {
+	const WebSocketImpl = globalThis.WebSocket;
 	if (
 		ws &&
-		ws.readyState !== WebSocket.CLOSED &&
-		ws.readyState !== WebSocket.CLOSING
+		ws.readyState !== WebSocketImpl.CLOSED &&
+		ws.readyState !== WebSocketImpl.CLOSING
 	) {
 		return;
 	}
-	ws = new WebSocket(`ws://${window.location.host}/_REACT_HMR/ws`);
+	ws = new WebSocketImpl(`ws://${window.location.host}/_REACT_HMR/ws`);
 }
 
 function isRouteBuildStartedMessage(
@@ -140,7 +146,7 @@ export function setupHMR(
 }
 
 export async function requestDevRouteBuild(pathname: string) {
-	const response = await fetch(
+	const response = await globalThis.fetch(
 		`/_REACT_HMR/build-route?pathname=${encodeURIComponent(pathname)}`,
 		{
 			headers: { accept: "application/json" },

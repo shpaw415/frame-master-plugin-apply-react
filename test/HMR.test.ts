@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { requestDevRouteBuild, setupHMR } from "../src/HMR";
+
+// RouterHMR (and other suites) may leave module mocks active; isolate this file.
+mock.restore();
+
+const { __resetHmrSocketForTests, requestDevRouteBuild, setupHMR } =
+	await import(`../src/HMR?hmr-unit=${Date.now()}`);
 
 class FakeWebSocket {
 	static instance: FakeWebSocket | null = null;
@@ -55,18 +60,24 @@ const originalWebSocket = globalThis.WebSocket;
 const originalFetch = globalThis.fetch;
 
 describe("setupHMR", () => {
+	beforeEach(() => {
+		__resetHmrSocketForTests();
+		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+		FakeWebSocket.instance = null;
+		FakeWebSocket.instancesCreated = 0;
+	});
+
 	afterEach(() => {
 		if (FakeWebSocket.instance) {
 			FakeWebSocket.instance.readyState = FakeWebSocket.CLOSED;
 		}
+		__resetHmrSocketForTests();
 		globalThis.WebSocket = originalWebSocket;
 		FakeWebSocket.instance = null;
 		FakeWebSocket.instancesCreated = 0;
 	});
 
 	test("dispatches update and build lifecycle messages to callbacks", async () => {
-		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-
 		const onRoutesUpdate = mock(async () => {});
 		const onRouteBuildStarted = mock(async () => {});
 		const onRouteBuildMissing = mock(async () => {});
@@ -114,8 +125,6 @@ describe("setupHMR", () => {
 	});
 
 	test("ignores malformed websocket payloads and keeps the listener alive", async () => {
-		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-
 		const onRoutesUpdate = mock(async () => {});
 		const cleanup = setupHMR({ onRoutesUpdate });
 		const socket = FakeWebSocket.instance;
@@ -133,8 +142,6 @@ describe("setupHMR", () => {
 	});
 
 	test("isolates callback errors so later messages still process", async () => {
-		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-
 		const onRouteBuildStarted = mock(async () => {
 			throw new Error("failing callback");
 		});
@@ -162,8 +169,6 @@ describe("setupHMR", () => {
 	});
 
 	test("reuses an open websocket across setup calls", async () => {
-		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-
 		const cleanupA = setupHMR({ onRoutesUpdate: async () => {} });
 		const cleanupB = setupHMR({ onRoutesUpdate: async () => {} });
 
@@ -173,8 +178,6 @@ describe("setupHMR", () => {
 	});
 
 	test("re-initializes websocket when previous instance is closed", async () => {
-		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-
 		const cleanupA = setupHMR({ onRoutesUpdate: async () => {} });
 		const firstSocket = FakeWebSocket.instance;
 		expect(firstSocket).not.toBeNull();
@@ -193,8 +196,6 @@ describe("setupHMR", () => {
 	});
 
 	test("ignores unknown message types", async () => {
-		globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-
 		const onRoutesUpdate = mock(async () => {});
 		const onRouteBuildStarted = mock(async () => {});
 		const onRouteBuildMissing = mock(async () => {});
