@@ -27,8 +27,8 @@
 		"start": "NODE_ENV=production bun frame-master start",
 		"build:dev": "NODE_ENV=development bun frame-master build",
 		"build": "NODE_ENV=production bun frame-master build",
-		"test": "bun test --tsconfig-override test/tsconfig.json test/*.test.ts test/*.test.tsx",
-		"test:unit": "bun test --tsconfig-override test/tsconfig.json test/*.test.ts test/*.test.tsx",
+		"test": "bun test --tsconfig-override test/tsconfig.json test/FastRefreshContent.test.tsx && bun test --tsconfig-override test/tsconfig.json test/*.test.ts test/ErrorWrapper.test.tsx test/ReactRefreshRuntime.test.ts test/ReactRefreshTransform.test.ts test/RouterHMR.test.tsx test/RouterHost.test.tsx test/utils.test.ts",
+		"test:unit": "bun run test",
 		"lint": "biome check",
 		"lint:write": "biome check --write"
 	},
