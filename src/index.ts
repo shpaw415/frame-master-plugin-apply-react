@@ -74,6 +74,17 @@ export function resolveChunkNamingPattern(
 	return `chunk-[hash]-${buildStamp}.[ext]`;
 }
 
+/**
+ * Cache-bust only the changed route's page chunk. Shared chunks intentionally
+ * keep stable URLs so React and React Refresh remain singletons in the page.
+ */
+export function cacheBustRoutePageChunk(source: string, buildStamp: number) {
+	return source.replace(
+		/(from\s+["'][^"']*chunk-[^"']+\.js)(["'])/,
+		`$1?t=${buildStamp}$2`,
+	);
+}
+
 export function extractImportSpecifiers(source: string): string[] {
 	const specifiers = new Set<string>();
 
@@ -800,8 +811,22 @@ export default function applyReactPluginToHTML(
 					],
 				};
 			},
-			afterBuild() {
+			async afterBuild(_config, outputs) {
 				if (!pendingRouteUpdate) return;
+
+				const routeFileName = buildRouteUpdatePath(pendingRouteUpdate);
+				const routeOutput = outputs.outputs.find((output) =>
+					output.path
+						.replaceAll("\\", "/")
+						.endsWith(`/@apply-react/routes/${routeFileName}`),
+				);
+				if (routeOutput) {
+					const source = await Bun.file(routeOutput.path).text();
+					await Bun.write(
+						routeOutput.path,
+						cacheBustRoutePageChunk(source, Date.now()),
+					);
+				}
 
 				sendHMRMessage({
 					type: "update-routes",

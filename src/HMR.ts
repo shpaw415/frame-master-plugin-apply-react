@@ -4,9 +4,12 @@ import { performReactRefresh } from "@apply-react/react-refresh-runtime.ts";
 import type { JSX } from "react";
 
 let ws: WebSocket | undefined;
+let heartbeat: ReturnType<typeof setInterval> | undefined;
 
 /** Test-only helper to drop the shared client socket between unit tests. */
 export function __resetHmrSocketForTests() {
+	if (heartbeat) clearInterval(heartbeat);
+	heartbeat = undefined;
 	ws = undefined;
 }
 
@@ -46,6 +49,10 @@ function initializeWebSocket() {
 	}
 	const scheme = resolveClientHmrWebsocketScheme();
 	ws = new WebSocketImpl(`${scheme}://${window.location.host}/_REACT_HMR/ws`);
+	if (heartbeat) clearInterval(heartbeat);
+	heartbeat = setInterval(() => {
+		if (ws?.readyState === WebSocketImpl.OPEN) ws.send("ping");
+	}, 5_000);
 }
 
 function isRouteBuildStartedMessage(

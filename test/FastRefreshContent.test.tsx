@@ -26,7 +26,10 @@ const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 type Root = import("react-dom/client").Root;
 
-import { resolveChunkNamingPattern } from "../src/index";
+import {
+	cacheBustRoutePageChunk,
+	resolveChunkNamingPattern,
+} from "../src/index";
 
 function flush() {
 	return new Promise((resolve) => setTimeout(resolve, 0));
@@ -68,6 +71,19 @@ describe("resolveChunkNamingPattern", () => {
 	test("never uses bare content-hash-only naming", () => {
 		expect(resolveChunkNamingPattern(42)).not.toBe("chunk-[hash].[ext]");
 		expect(resolveChunkNamingPattern(42)).toContain("42");
+	});
+});
+
+describe("cacheBustRoutePageChunk", () => {
+	test("only cache-busts the route page chunk, not shared side-effect chunks", () => {
+		const output = cacheBustRoutePageChunk(
+			`import { Page } from "../../chunk-page.js";
+import "../../chunk-react.js";
+export { Page as default };`,
+			123,
+		);
+		expect(output).toContain('from "../../chunk-page.js?t=123"');
+		expect(output).toContain('import "../../chunk-react.js"');
 	});
 });
 
