@@ -35,6 +35,12 @@ function flush() {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function refresh() {
+	await act(async () => {
+		RefreshRuntime.performReactRefresh();
+	});
+}
+
 function registerDefault(moduleId: string, type: unknown) {
 	RefreshRuntime.register(type, `${moduleId} default`);
 }
@@ -134,11 +140,7 @@ describe("Fast Refresh content round-trip", () => {
 
 		// Edit: page 1 → page 2
 		registerDefault(moduleId, makePage("page 2"));
-		await act(async () => {
-			RefreshRuntime.performReactRefresh();
-			await flush();
-			await flush();
-		});
+		await refresh();
 		expect(container.querySelector("[data-testid='title']")?.textContent).toBe(
 			"page 2",
 		);
@@ -148,11 +150,7 @@ describe("Fast Refresh content round-trip", () => {
 
 		// Revert: page 2 → page 1 (the flaky case when chunk URLs collide)
 		registerDefault(moduleId, makePage("page 1"));
-		await act(async () => {
-			RefreshRuntime.performReactRefresh();
-			await flush();
-			await flush();
-		});
+		await refresh();
 		expect(container.querySelector("[data-testid='title']")?.textContent).toBe(
 			"page 1",
 		);
@@ -162,11 +160,7 @@ describe("Fast Refresh content round-trip", () => {
 
 		// Another prior-like string
 		registerDefault(moduleId, makePage("page"));
-		await act(async () => {
-			RefreshRuntime.performReactRefresh();
-			await flush();
-			await flush();
-		});
+		await refresh();
 		expect(container.querySelector("[data-testid='title']")?.textContent).toBe(
 			"page",
 		);
