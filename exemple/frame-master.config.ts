@@ -5,10 +5,12 @@ import ServeFromBuild from "frame-master-plugin-serve-from-build";
 
 export default {
 	HTTPServer: {
-		port: 3000,
+		port: process.env.PORT ?? 3000,
 	},
 	pluginsOptions: {
 		entrypoints: ["index.html"],
+		// serve-from-build still peers frame-master ^3.x during the staged v4 migration
+		skipRequirementsCheck: true,
 	},
 	plugins: [
 		ApplyReact({
@@ -16,6 +18,11 @@ export default {
 			route: "src/pages",
 			style: "nextjs",
 			enableHMR: true,
+			enableFastRefresh: true,
+			HMROptions: {
+				// auto: wss on https (dev.webcreas.com tunnel), ws on http localhost
+				websocket: "auto",
+			},
 		}) as FrameMasterPlugin,
 		ServeFromBuild({
 			buildDir: ".frame-master/build",
@@ -24,9 +31,14 @@ export default {
 		{
 			name: "builder",
 			version: "0.1.0",
-			serverReady({ builder }) {
-				builder.build();
+			serverReady: async ({ builder }) => {
+				await builder.build();
 			},
+			"build": {
+				afterBuild: async () => {
+					console.log("Build completed!");
+				}
+			}
 		},
 	],
 } satisfies FrameMasterConfig;
