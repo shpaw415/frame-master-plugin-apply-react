@@ -784,7 +784,12 @@ export default function applyReactPluginToHTML(
 							name: "apply-routes-to-hydrate",
 							setup(build) {
 								build.onLoad({ filter: /.*/ }, async (args) => {
-									if (await directiveToolSingleton.pathIs("server-only", args.path)) {
+									if (
+										await directiveToolSingleton.pathIs(
+											"server-only",
+											args.path,
+										)
+									) {
 										return {
 											contents: "",
 											loader: "js",
