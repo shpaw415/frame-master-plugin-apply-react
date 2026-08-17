@@ -7,7 +7,8 @@ import {
 	type FrameMasterPlugin,
 	getChainableContent,
 } from "frame-master/plugin";
-import { directiveManager, isProd } from "frame-master/utils";
+import { directiveToolSingleton } from "frame-master/plugin/utils";
+import { isProd } from "frame-master/utils";
 import { name, peerDependencies, version } from "../package.json";
 import { transformReactRefreshModule } from "./react-refresh-transform";
 
@@ -783,7 +784,7 @@ export default function applyReactPluginToHTML(
 							name: "apply-routes-to-hydrate",
 							setup(build) {
 								build.onLoad({ filter: /.*/ }, async (args) => {
-									if (await directiveManager.pathIs("server-only", args.path)) {
+									if (await directiveToolSingleton.pathIs("server-only", args.path)) {
 										return {
 											contents: "",
 											loader: "js",
