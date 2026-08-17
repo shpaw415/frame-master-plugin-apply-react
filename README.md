@@ -271,7 +271,7 @@ type RouterErrorFallbackProps = {
 
 ## Server-Only Modules
 
-The plugin automatically protects server-only code from being bundled in the client build. Any module that should only run on the server will throw an error if accidentally imported client-side.
+The plugin automatically protects server-only code from being bundled in the client build. Original exports are replaced with stubs that throw `Cannot use <export> on a client build (server-only)` if the module is imported client-side.
 
 ## Best Practices
 

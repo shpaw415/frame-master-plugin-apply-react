@@ -155,6 +155,41 @@ function getBunLoader(filePath: string) {
 	}
 }
 
+function scanLoaderForPath(filePath: string) {
+	const loader = getBunLoader(filePath);
+	if (loader === "tsx" || loader === "jsx") return loader;
+	return "ts" as const;
+}
+
+export function createServerOnlyClientStub(source: string, filePath: string) {
+	const exportNames = new Bun.Transpiler({
+		loader: scanLoaderForPath(filePath),
+	}).scan(source).exports;
+	const displayPath = filePath.replaceAll("\\", "/");
+	const throwFor = (name: string) =>
+		`throw new Error(${JSON.stringify(
+			`Cannot use ${name} from "${displayPath}" on a client build (server-only).`,
+		)})`;
+
+	if (exportNames.length === 0) {
+		return {
+			contents: `${throwFor("this module")};\n`,
+			loader: "js" as const,
+		};
+	}
+
+	return {
+		contents: exportNames
+			.map((name) =>
+				name === "default"
+					? `export default function _default() { ${throwFor("default")} }`
+					: `export const ${name} = () => { ${throwFor(name)} };`,
+			)
+			.join("\n"),
+		loader: "js" as const,
+	};
+}
+
 export function shouldTransformReactRefreshModule(
 	projectRoot: string,
 	filePath: string,
@@ -784,10 +819,10 @@ export default function applyReactPluginToHTML(
 							setup(build) {
 								build.onLoad({ filter: /.*/ }, async (args) => {
 									if (await directiveManager.pathIs("server-only", args.path)) {
-										return {
-											contents: "",
-											loader: "js",
-										};
+										return createServerOnlyClientStub(
+											await getChainableContent(args),
+											args.path,
+										);
 									}
 
 									if (

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	createServerOnlyClientStub,
 	extractImportSpecifiers,
 	getRoutePathnameFromFileChange,
 	resolveFastRefreshEnabled,
@@ -148,5 +149,39 @@ describe("resolveHmrWebsocketProtocol", () => {
 		expect(resolveHmrWebsocketProtocol("ws")).toBe("ws");
 		expect(resolveHmrWebsocketProtocol("wss")).toBe("wss");
 		expect(resolveHmrWebsocketProtocol("auto")).toBe("auto");
+	});
+});
+
+describe("createServerOnlyClientStub", () => {
+	test("replaces named and default exports with client-build errors", () => {
+		const stub = createServerOnlyClientStub(
+			`
+				export const db = { query() { return 1; } };
+				export function loadUser() { return "secret"; }
+				export default function ServerPage() { return null; }
+			`,
+			"/app/src/db.server.ts",
+		);
+
+		expect(stub.loader).toBe("js");
+		expect(stub.contents).toContain("export const db = () =>");
+		expect(stub.contents).toContain("export const loadUser = () =>");
+		expect(stub.contents).toContain("export default function _default()");
+		expect(stub.contents).toContain("Cannot use db from");
+		expect(stub.contents).toContain("/app/src/db.server.ts");
+		expect(stub.contents).toContain("on a client build (server-only).");
+		expect(stub.contents).not.toContain("secret");
+		expect(stub.contents).not.toContain("query()");
+	});
+
+	test("throws on import when the server-only module has no exports", () => {
+		const stub = createServerOnlyClientStub(
+			`"server-only";\nconsole.log("side effect");`,
+			"/app/src/secret.ts",
+		);
+
+		expect(stub.contents).toContain("Cannot use this module from");
+		expect(stub.contents).toContain("/app/src/secret.ts");
+		expect(stub.contents).not.toContain("side effect");
 	});
 });
