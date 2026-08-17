@@ -2,7 +2,10 @@ import type { JSX } from "react";
 
 const isTestMode = process.env.NODE_ENV === "test";
 
-const routes: Record<string, () => Promise<() => JSX.Element>> = isTestMode
+const routes: Record<
+	string,
+	() => Promise<(...args: never[]) => JSX.Element>
+> = isTestMode
 	? {
 			"/": () => import("../test/src/pages/index").then((mod) => mod.default),
 			"/layout": () =>

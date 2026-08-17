@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.0.0
+
+### Breaking
+
+- Requires Frame-Master 4.x (`peerDependencies.frame-master` is now `^4.0.0-0`).
+- Generated `@apply-react/*` bootstraps are declared on plugin-owned `virtualModules` instead of `buildConfig.files` and a custom runtime `onResolve`/`onLoad` loop.
+
+### Added
+
+- `requirement.frameMasterVersion` is derived from the package `frame-master` peer.
+- `serverStop` closes HMR sockets and drops the live builder on reload, dispose, and process shutdown.
+- `frame-master/testing` regression coverage for the v4 virtual-module registry.
+
 ## Unreleased
 
 ### Added

@@ -3,10 +3,12 @@ import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Builder } from "frame-master/build";
-import type { FrameMasterPlugin } from "frame-master/plugin";
+import {
+	type FrameMasterPlugin,
+	getChainableContent,
+} from "frame-master/plugin";
 import { directiveManager, isProd } from "frame-master/utils";
-import { name, version } from "../package.json";
-import { escapeRegExp } from "./plugin-utils";
+import { name, peerDependencies, version } from "../package.json";
 import { transformReactRefreshModule } from "./react-refresh-transform";
 
 const TRACKED_SOURCE_EXTENSIONS = new Set([
@@ -656,9 +658,7 @@ export default function applyReactPluginToHTML(
 		};
 	};
 
-	const generateVirtualModulePathAndContent = () =>
-		({
-			"@apply-react/client-routes.ts": `
+	const generateClientRoutesModule = () => `
           			${Object.entries(getRoutes(currentDevRoute, fileRouter))
 									.map(
 										([_pathname, filePath], index) =>
@@ -671,40 +671,96 @@ export default function applyReactPluginToHTML(
 												`"${pathname}": () => import("${fp}").then((mod) => mod.default)`,
 										)
 										.join(",\n")} };
-          			`,
-			...Object.assign(
-				{},
-				...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
-					[toRoutePath(fp)]: `export { default } from "${fp}";`,
-				})),
-			),
-			"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
-			"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
-			// HMR modules
-			"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
-			"@apply-react/react-refresh-runtime.ts":
+          			`;
+
+	const virtualModules: NonNullable<FrameMasterPlugin["virtualModules"]> = {
+		"@apply-react/client-routes.ts": {
+			contents: generateClientRoutesModule,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/client-hydrate.tsx": {
+			contents: `export * from "${join(__dirname, "hydrate.tsx")}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+		"@apply-react/client-shell.tsx": {
+			contents: `export { default } from "${pathToClientShell}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+		"@apply-react/HMR.ts": {
+			contents: `export * from "${join(__dirname, "HMR.ts")}";`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/react-refresh-runtime.ts": {
+			contents:
 				fastRefreshEnabled && !isProd()
 					? `export * from "${join(__dirname, "react-refresh-runtime.ts")}";`
 					: "export function performReactRefresh() {}",
-			"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
-			"@apply-react/fast-refresh-enabled.ts": `const FAST_REFRESH_ENABLED = ${fastRefreshEnabled && !isProd()};export default FAST_REFRESH_ENABLED;`,
-			"@apply-react/hmr-websocket-protocol.ts": `const HMR_WEBSOCKET_PROTOCOL = ${JSON.stringify(hmrWebsocketProtocol)};export default HMR_WEBSOCKET_PROTOCOL;`,
-			"@apply-react/development-mode.ts": `const IS_DEVELOPMENT = ${!isProd()};export default IS_DEVELOPMENT;`,
-			"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, enableHMR, enableFastRefresh: fastRefreshEnabled, HMROptions: { websocket: hmrWebsocketProtocol }, hydration, entrypointExtensions, fallbacks })}; export default props;`,
-			"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
-			"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
-		}) as Record<string, string>;
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/HMR-enabled.ts": {
+			contents: `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/fast-refresh-enabled.ts": {
+			contents: `const FAST_REFRESH_ENABLED = ${fastRefreshEnabled && !isProd()};export default FAST_REFRESH_ENABLED;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/hmr-websocket-protocol.ts": {
+			contents: `const HMR_WEBSOCKET_PROTOCOL = ${JSON.stringify(hmrWebsocketProtocol)};export default HMR_WEBSOCKET_PROTOCOL;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/development-mode.ts": {
+			contents: `const IS_DEVELOPMENT = ${!isProd()};export default IS_DEVELOPMENT;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/props.ts": {
+			contents: `const props = ${JSON.stringify({ ...props, enableHMR, enableFastRefresh: fastRefreshEnabled, HMROptions: { websocket: hmrWebsocketProtocol }, hydration, entrypointExtensions, fallbacks })}; export default props;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/404.tsx": {
+			contents: `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+		"@apply-react/loading.tsx": {
+			contents: `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+	};
+
 	return {
 		name,
 		version,
+		requirement: {
+			frameMasterVersion: peerDependencies["frame-master"],
+		},
+		virtualModules,
 		serverReady({ builder }) {
 			liveBuilder = builder;
 			void refreshDependencyGraph();
 		},
+		serverStop() {
+			liveBuilder = null;
+			for (const ws of wsList) {
+				try {
+					ws.close();
+				} catch {}
+			}
+			wsList.length = 0;
+		},
 		build: {
 			buildConfig: () => {
-				const virtualModulesList = generateVirtualModulePathAndContent();
-
 				return {
 					entrypoints: [
 						...(isProd() ? [] : [...DevReactEntryPoints]),
@@ -721,7 +777,6 @@ export default function applyReactPluginToHTML(
 							: "chunk-[hash].[ext]",
 					},
 					minify: isProd(),
-					files: virtualModulesList,
 					plugins: [
 						...(isProd() ? [] : [reactDedupePlugin]),
 						{
@@ -743,22 +798,16 @@ export default function applyReactPluginToHTML(
 										return;
 									}
 
-									const contents =
-										args.__chainedContents ??
-										virtualModulesList[args.path] ??
-										(await Bun.file(args.path).text());
+									const contents = await getChainableContent(args);
 									const moduleId = relative(cwd, args.path).replaceAll(
 										"\\",
 										"/",
 									);
 									return {
-										contents: await transformReactRefreshModule(
-											contents as string,
-											{
-												filename: args.path,
-												moduleId,
-											},
-										),
+										contents: await transformReactRefreshModule(contents, {
+											filename: args.path,
+											moduleId,
+										}),
 										loader: getBunLoader(args.path),
 									};
 								});
@@ -781,12 +830,8 @@ export default function applyReactPluginToHTML(
 									});
 
 								build.onLoad({ filter: /\.html$/ }, async (args) => {
-									const contents =
-										args.__chainedContents ??
-										(await Bun.file(args.path).text());
-									const transformed = htmlrewriter.transform(
-										contents as string,
-									);
+									const contents = await getChainableContent(args);
+									const transformed = htmlrewriter.transform(contents);
 									return {
 										contents: transformed,
 									};
@@ -838,32 +883,6 @@ export default function applyReactPluginToHTML(
 				void refreshDependencyGraph();
 			},
 		},
-		runtimePlugins: [
-			{
-				name: "apply-react-runtime",
-				setup(runtime) {
-					const virtualModules = generateVirtualModulePathAndContent();
-
-					Object.entries(virtualModules).forEach(([path, content]) => {
-						runtime.onResolve({ filter: escapeRegExp(path) }, (_args) => {
-							return {
-								path,
-								namespace: "apply-react-virtual",
-							};
-						});
-						runtime.onLoad(
-							{ filter: escapeRegExp(path), namespace: "apply-react-virtual" },
-							async (_args) => {
-								return {
-									contents: content,
-									loader: path.split(".").pop() as "ts",
-								};
-							},
-						);
-					});
-				},
-			},
-		],
 		serverConfig: {
 			routes: {
 				"/_REACT_HMR/ws": enableHMR
@@ -907,7 +926,7 @@ export default function applyReactPluginToHTML(
 			},
 		},
 		fileSystemWatchDir: watchDirectoriesResolved,
-		onFileSystemChange(_ev, _fname, absolutePath) {
+		async onFileSystemChange(_ev, _fname, absolutePath) {
 			const changedAbsolutePath = normalizeWatchedFilePath(cwd, absolutePath);
 			const routePathname = getRoutePathnameFromFileChange(
 				cwd,
@@ -922,7 +941,8 @@ export default function applyReactPluginToHTML(
 						pathname: matchedRoute.pathname,
 						matchedRoute,
 					});
-					return runQueuedDevBuilds();
+					await runQueuedDevBuilds();
+					return;
 				}
 			}
 
@@ -938,7 +958,7 @@ export default function applyReactPluginToHTML(
 				if (!target) continue;
 				scheduleDevRouteBuild(target);
 			}
-			return runQueuedDevBuilds();
+			await runQueuedDevBuilds();
 		},
 		router: {
 			async before_request(master) {

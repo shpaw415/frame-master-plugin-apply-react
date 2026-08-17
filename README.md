@@ -18,6 +18,8 @@ A Frame-Master plugin that adds React client-side hydration and interactivity to
 bun add frame-master-plugin-apply-react
 ```
 
+Requires **Frame-Master 4.x** (`frame-master@^4.0.0-0`).
+
 ## Quick Start
 
 ### 1. Configure the Plugin

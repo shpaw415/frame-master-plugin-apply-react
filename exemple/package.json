@@ -10,7 +10,7 @@
 		"typescript": "^5.9.3"
 	},
 	"dependencies": {
-		"frame-master": "^3.2.2",
+		"frame-master": "4.0.0-beta.3",
 		"frame-master-plugin-apply-react": "..",
 		"frame-master-plugin-serve-from-build": "^1.1.1",
 		"react": "19.2.8",

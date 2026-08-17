@@ -9,6 +9,8 @@ export default {
 	},
 	pluginsOptions: {
 		entrypoints: ["index.html"],
+		// serve-from-build still peers frame-master ^3.x during the staged v4 migration
+		skipRequirementsCheck: true,
 	},
 	plugins: [
 		ApplyReact({
