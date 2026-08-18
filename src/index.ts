@@ -1,8 +1,316 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Builder } from "frame-master/build";
-import type { FrameMasterPlugin } from "frame-master/plugin";
+import {
+	type FrameMasterPlugin,
+	getChainableContent,
+} from "frame-master/plugin";
 import { directiveManager, isProd } from "frame-master/utils";
-import { name, version } from "../package.json";
+import { name, peerDependencies, version } from "../package.json";
+import { transformReactRefreshModule } from "./react-refresh-transform";
+
+const TRACKED_SOURCE_EXTENSIONS = new Set([
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mjs",
+	".cjs",
+	".mts",
+	".cts",
+	".json",
+	".css",
+	".scss",
+	".sass",
+	".less",
+]);
+
+const NON_RECURSIVE_EXTENSIONS = new Set([
+	".json",
+	".css",
+	".scss",
+	".sass",
+	".less",
+]);
+
+const DevReactEntryPoints = [
+	"react",
+	"react-dom",
+	"node_modules/react/cjs/react-jsx-dev-runtime.development.js",
+	"node_modules/react/jsx-dev-runtime.js",
+	"node_modules/react/cjs/react.development.js",
+	"node_modules/react-dom/cjs/react-dom.development.js",
+] as const;
+
+const VirtualModules = [
+	"@apply-react/client-routes.ts",
+	"@apply-react/client-hydrate.tsx",
+	"@apply-react/HMR.ts",
+	"@apply-react/react-refresh-runtime.ts",
+	"@apply-react/client-shell.tsx",
+	"@apply-react/404.tsx",
+	"@apply-react/loading.tsx",
+	"@apply-react/fast-refresh-enabled.ts",
+	"@apply-react/hmr-websocket-protocol.ts",
+	"@apply-react/development-mode.ts",
+] as const;
+
+const IMPORT_SPECIFIER_PATTERNS = [
+	/(?:import|export)\s+(?:type\s+)?[\s\S]*?from\s+["']([^"']+)["']/g,
+	/import\s*["']([^"']+)["']/g,
+	/import\s*\(\s*["']([^"']+)["']\s*\)/g,
+	/require\s*\(\s*["']([^"']+)["']\s*\)/g,
+];
+
+/**
+ * Bun chunk filename pattern for apply-react builds.
+ * Always include a per-build stamp so HMR rebuilds never reuse a previous
+ * content-hash URL (reverting source would otherwise skip ESM re-eval and
+ * leave Fast Refresh with a stale component type).
+ */
+export function resolveChunkNamingPattern(
+	buildStamp: number = Date.now(),
+): string {
+	return `chunk-[hash]-${buildStamp}.[ext]`;
+}
+
+/**
+ * Cache-bust only the changed route's page chunk. Shared chunks intentionally
+ * keep stable URLs so React and React Refresh remain singletons in the page.
+ */
+export function cacheBustRoutePageChunk(source: string, buildStamp: number) {
+	return source.replace(
+		/(from\s+["'][^"']*chunk-[^"']+\.js)(["'])/,
+		`$1?t=${buildStamp}$2`,
+	);
+}
+
+export function extractImportSpecifiers(source: string): string[] {
+	const specifiers = new Set<string>();
+
+	for (const pattern of IMPORT_SPECIFIER_PATTERNS) {
+		for (const match of source.matchAll(pattern)) {
+			const specifier = match[1]?.trim();
+			if (!specifier) continue;
+			specifiers.add(specifier);
+		}
+	}
+
+	return [...specifiers];
+}
+
+function normalizeWatchedFilePath(projectRoot: string, filePath: string) {
+	return resolve(projectRoot, filePath);
+}
+
+function isWithinProject(projectRoot: string, filePath: string) {
+	const relativePath = relative(projectRoot, filePath);
+	return (
+		relativePath !== "" &&
+		!relativePath.startsWith("..") &&
+		!isAbsolute(relativePath)
+	);
+}
+
+function isIgnoredForDependencyTracking(projectRoot: string, filePath: string) {
+	if (!isWithinProject(projectRoot, filePath)) return true;
+	const relativePath = relative(projectRoot, filePath);
+	return (
+		relativePath.startsWith(".git/") ||
+		relativePath.startsWith(".frame-master/") ||
+		relativePath.startsWith("release-notes/")
+	);
+}
+
+function resolveWithKnownExtensions(candidatePath: string) {
+	if (existsSync(candidatePath)) return candidatePath;
+
+	for (const extension of TRACKED_SOURCE_EXTENSIONS) {
+		const withExtension = `${candidatePath}${extension}`;
+		if (existsSync(withExtension)) return withExtension;
+	}
+
+	for (const extension of TRACKED_SOURCE_EXTENSIONS) {
+		const asIndex = join(candidatePath, `index${extension}`);
+		if (existsSync(asIndex)) return asIndex;
+	}
+
+	return null;
+}
+
+function getBunLoader(filePath: string) {
+	switch (extname(filePath)) {
+		case ".tsx":
+			return "tsx" as const;
+		case ".jsx":
+			return "jsx" as const;
+		case ".ts":
+		case ".mts":
+		case ".cts":
+			return "ts" as const;
+		default:
+			return "js" as const;
+	}
+}
+
+function scanLoaderForPath(filePath: string) {
+	const loader = getBunLoader(filePath);
+	if (loader === "tsx" || loader === "jsx") return loader;
+	return "ts" as const;
+}
+
+export function createServerOnlyClientStub(source: string, filePath: string) {
+	const exportNames = new Bun.Transpiler({
+		loader: scanLoaderForPath(filePath),
+	}).scan(source).exports;
+	const displayPath = filePath.replaceAll("\\", "/");
+	const throwFor = (name: string) =>
+		`throw new Error(${JSON.stringify(
+			`Cannot use ${name} from "${displayPath}" on a client build (server-only).`,
+		)})`;
+
+	if (exportNames.length === 0) {
+		return {
+			contents: `${throwFor("this module")};\n`,
+			loader: "js" as const,
+		};
+	}
+
+	return {
+		contents: exportNames
+			.map((name) =>
+				name === "default"
+					? `export default function _default() { ${throwFor("default")} }`
+					: `export const ${name} = () => { ${throwFor(name)} };`,
+			)
+			.join("\n"),
+		loader: "js" as const,
+	};
+}
+
+export function shouldTransformReactRefreshModule(
+	projectRoot: string,
+	filePath: string,
+) {
+	if (!isWithinProject(projectRoot, filePath)) return false;
+
+	const relativePath = relative(projectRoot, filePath);
+	if (relativePath.split(/[\\/]/).includes("node_modules")) return false;
+
+	const extension = extname(filePath);
+	return (
+		TRACKED_SOURCE_EXTENSIONS.has(extension) &&
+		!NON_RECURSIVE_EXTENSIONS.has(extension)
+	);
+}
+
+export function resolveFastRefreshEnabled(
+	enableHMR: boolean,
+	enableFastRefresh: boolean | undefined,
+) {
+	return enableHMR && (enableFastRefresh ?? enableHMR);
+}
+
+export type HmrWebsocketProtocol = "ws" | "wss" | "auto";
+
+export function resolveHmrWebsocketProtocol(
+	websocket: HmrWebsocketProtocol | undefined,
+): HmrWebsocketProtocol {
+	if (websocket === "ws" || websocket === "wss" || websocket === "auto") {
+		return websocket;
+	}
+	return "auto";
+}
+
+function resolveImportSpecifier(
+	sourceFilePath: string,
+	specifier: string,
+	projectRoot: string,
+) {
+	if (specifier.startsWith("node:") || specifier.startsWith("bun:")) {
+		return null;
+	}
+
+	if (specifier.startsWith(".") || specifier.startsWith("/")) {
+		const fromSource = specifier.startsWith("/")
+			? resolve(projectRoot, `.${specifier}`)
+			: resolve(join(sourceFilePath, ".."), specifier);
+		return resolveWithKnownExtensions(fromSource);
+	}
+
+	try {
+		const resolvedUrl = import.meta.resolve(
+			specifier,
+			pathToFileURL(sourceFilePath).href,
+		);
+		if (!resolvedUrl.startsWith("file:")) return null;
+		return resolveWithKnownExtensions(fileURLToPath(resolvedUrl));
+	} catch {
+		return null;
+	}
+}
+
+async function collectFileDependencies(
+	entryFilePath: string,
+	projectRoot: string,
+) {
+	const stack = [entryFilePath];
+	const discovered = new Set<string>();
+
+	while (stack.length > 0) {
+		const current = stack.pop();
+		if (!current) continue;
+		const normalizedCurrent = normalizeWatchedFilePath(projectRoot, current);
+
+		if (discovered.has(normalizedCurrent)) continue;
+		if (isIgnoredForDependencyTracking(projectRoot, normalizedCurrent))
+			continue;
+
+		discovered.add(normalizedCurrent);
+
+		if (!existsSync(normalizedCurrent)) continue;
+		const extension = extname(normalizedCurrent);
+		if (!TRACKED_SOURCE_EXTENSIONS.has(extension)) continue;
+		if (NON_RECURSIVE_EXTENSIONS.has(extension)) continue;
+
+		let source: string;
+		try {
+			source = await readFile(normalizedCurrent, "utf8");
+		} catch {
+			continue;
+		}
+
+		const specifiers = extractImportSpecifiers(source);
+		for (const specifier of specifiers) {
+			const resolvedDependency = resolveImportSpecifier(
+				normalizedCurrent,
+				specifier,
+				projectRoot,
+			);
+			if (!resolvedDependency) continue;
+			if (isIgnoredForDependencyTracking(projectRoot, resolvedDependency))
+				continue;
+			stack.push(resolvedDependency);
+		}
+	}
+
+	return discovered;
+}
+
+const reactDedupePlugin: Bun.BunPlugin = {
+	name: "react-dedupe",
+	setup(build) {
+		const appNodeModules = resolve(process.cwd(), "./node_modules");
+		build.onResolve({ filter: /^react$/ }, () => ({
+			path: resolve(appNodeModules, "react/index.js"),
+		}));
+		build.onResolve({ filter: /^react\/jsx-runtime$/ }, () => ({
+			path: resolve(appNodeModules, "react/jsx-runtime.js"),
+		}));
+	},
+};
 
 /**
  * Configuration options for the Apply-React plugin
@@ -28,6 +336,52 @@ export type ApplyReactPluginOptions = {
 	 * @default true
 	 */
 	enableHMR?: boolean;
+
+	/**
+	 * Client HMR transport options.
+	 */
+	HMROptions?: {
+		/**
+		 * WebSocket scheme used by the browser HMR client.
+		 *
+		 * - `"ws"` — always `ws://` (local http)
+		 * - `"wss"` — always `wss://` (HTTPS reverse proxies / tunnels)
+		 * - `"auto"` — `wss` when `location.protocol === "https:"`, else `ws`
+		 *
+		 * Use `"wss"` or `"auto"` behind HTTPS tunnels (e.g. Cloudflare) so mixed
+		 * content does not block the HMR socket.
+		 *
+		 * @default "auto"
+		 */
+		websocket?: "ws" | "wss" | "auto";
+	};
+
+	/**
+	 * Enable React Fast Refresh during development HMR updates.
+	 *
+	 * When enabled, compatible component and provider state is retained and
+	 * top-level exported React contexts preserve their identity across updates.
+	 *
+	 * @default Same value as `enableHMR`
+	 */
+	enableFastRefresh?: boolean;
+
+	/**
+	 * Directories to watch for HMR file changes.
+	 *
+	 * Relative paths are resolved from the project root.
+	 *
+	 * @default [".", "node_modules"]
+	 */
+	watchDirectories?: string[];
+
+	/**
+	 * Directories to exclude from HMR watching.
+	 *
+	 * Excludes are applied after `watchDirectories`, so exclusions always win.
+	 * Relative paths are resolved from the project root.
+	 */
+	watchDirectoriesExclude?: string[];
 
 	/**
 	 * Hydration method to use on the client
@@ -61,6 +415,39 @@ export type ApplyReactPluginOptions = {
 	}>;
 };
 
+export function resolveWatchDirectories(
+	enableHMR: boolean,
+	watchDirectories?: string[],
+	watchDirectoriesExclude?: string[],
+) {
+	if (!enableHMR) return undefined;
+	const includeDirectories = watchDirectories ?? [".", "node_modules"];
+
+	const cleanedDirectories = includeDirectories
+		.map((directory) => directory.trim())
+		.filter((directory) => directory.length > 0);
+
+	const uniqueDirectories = [...new Set(cleanedDirectories)];
+	if (uniqueDirectories.length === 0) return undefined;
+
+	if (!watchDirectoriesExclude || watchDirectoriesExclude.length === 0) {
+		return uniqueDirectories;
+	}
+
+	const excludedDirectories = new Set(
+		watchDirectoriesExclude
+			.map((directory) => directory.trim())
+			.filter((directory) => directory.length > 0),
+	);
+
+	const resolvedDirectories = uniqueDirectories.filter(
+		(directory) => !excludedDirectories.has(directory),
+	);
+
+	if (resolvedDirectories.length === 0) return undefined;
+	return resolvedDirectories;
+}
+
 /**
  * Apply React Plugin for Frame Master
  *
@@ -82,6 +469,7 @@ export type ApplyReactPluginOptions = {
  * @param props.route - Base path for route files (e.g., "src/pages")
  * @param props.clientShellPath - Optional custom shell for client-side hydration
  * @param props.enableHMR - Enable Hot Module Replacement (default: true on dev & false on prod)
+ * @param props.enableFastRefresh - Preserve compatible React state during HMR (default: follows enableHMR)
  *
  * @returns Frame Master plugin instance with React integration
  *
@@ -104,10 +492,21 @@ export default function applyReactPluginToHTML(
 		style,
 		route,
 		enableHMR = process.env.NODE_ENV !== "production",
+		HMROptions = {},
+		enableFastRefresh,
+		watchDirectories,
+		watchDirectoriesExclude,
 		entrypointExtensions = [".tsx", ".jsx"],
 		fallbacks = {},
 		hydration = "hydrate",
 	} = props;
+	const fastRefreshEnabled = resolveFastRefreshEnabled(
+		enableHMR,
+		enableFastRefresh,
+	);
+	const hmrWebsocketProtocol = resolveHmrWebsocketProtocol(
+		HMROptions.websocket,
+	);
 	const cwd = process.cwd();
 
 	const pathToClientShell = props.clientShellPath
@@ -120,16 +519,13 @@ export default function applyReactPluginToHTML(
 		fileExtensions: entrypointExtensions,
 	});
 
-	const DevReactEntryPoints = [
-		"react",
-		"react-dom",
-		"node_modules/react/cjs/react-jsx-dev-runtime.development.js",
-		"node_modules/react/jsx-dev-runtime.js",
-		"node_modules/react/cjs/react.development.js",
-		"node_modules/react-dom/cjs/react-dom.development.js",
-	];
 	const wsList: Bun.ServerWebSocket[] = [];
 	const routeDir = join(cwd, route);
+	const watchDirectoriesResolved = resolveWatchDirectories(
+		enableHMR,
+		watchDirectories,
+		watchDirectoriesExclude,
+	);
 	let liveBuilder: Builder | null = null;
 
 	const toRoutePath = (fp: string) =>
@@ -144,9 +540,13 @@ export default function applyReactPluginToHTML(
 	};
 
 	let currentDevRoute: DevBuildTarget | null = null;
-	let queuedDevRoute: DevBuildTarget | null = null;
+	const queuedDevRoutes: DevBuildTarget[] = [];
+	const queuedRouteNames = new Set<string>();
 	let pendingRouteUpdate: DevBuildTarget | null = null;
 	let selectiveBuildPromise: Promise<void> | null = null;
+	let refreshDependencyGraphPromise: Promise<void> | null = null;
+	let targetByRouteName = new Map<string, DevBuildTarget>();
+	let dependentRouteNamesByFilePath = new Map<string, Set<string>>();
 
 	const sendHMRMessage = (message: HMRMessage) => {
 		wsList.forEach((ws) => {
@@ -157,7 +557,65 @@ export default function applyReactPluginToHTML(
 	};
 
 	const queueDevRouteBuild = (target: DevBuildTarget) => {
-		queuedDevRoute = target;
+		const routeName = target.matchedRoute.name;
+		if (queuedRouteNames.has(routeName)) return;
+		queuedRouteNames.add(routeName);
+		queuedDevRoutes.push(target);
+	};
+
+	const scheduleDevRouteBuild = (target: DevBuildTarget) => {
+		sendHMRMessage({
+			type: "route-build-started",
+			pathname: target.pathname,
+			routeName: target.matchedRoute.name,
+		});
+		queueDevRouteBuild(target);
+	};
+
+	const collectDevBuildTargets = () => {
+		const targets: DevBuildTarget[] = [];
+		for (const pathname of Object.keys(fileRouter.routes)) {
+			const matchedRoute = fileRouter.match(pathname);
+			if (!matchedRoute) continue;
+			targets.push({
+				matchedRoute,
+				pathname: matchedRoute.pathname,
+			});
+		}
+		return targets;
+	};
+
+	const refreshDependencyGraph = async () => {
+		if (refreshDependencyGraphPromise) return refreshDependencyGraphPromise;
+
+		refreshDependencyGraphPromise = (async () => {
+			const nextTargetByRouteName = new Map<string, DevBuildTarget>();
+			const nextDependentRouteNamesByFilePath = new Map<string, Set<string>>();
+
+			const targets = collectDevBuildTargets();
+			for (const target of targets) {
+				nextTargetByRouteName.set(target.matchedRoute.name, target);
+				const routeFilePath = normalizeWatchedFilePath(
+					cwd,
+					target.matchedRoute.filePath,
+				);
+				const dependencies = await collectFileDependencies(routeFilePath, cwd);
+
+				for (const dependencyPath of dependencies) {
+					const routes =
+						nextDependentRouteNamesByFilePath.get(dependencyPath) ?? new Set();
+					routes.add(target.matchedRoute.name);
+					nextDependentRouteNamesByFilePath.set(dependencyPath, routes);
+				}
+			}
+
+			targetByRouteName = nextTargetByRouteName;
+			dependentRouteNamesByFilePath = nextDependentRouteNamesByFilePath;
+		})().finally(() => {
+			refreshDependencyGraphPromise = null;
+		});
+
+		return refreshDependencyGraphPromise;
 	};
 
 	const runQueuedDevBuilds = async () => {
@@ -165,9 +623,10 @@ export default function applyReactPluginToHTML(
 		if (!builder || selectiveBuildPromise) return selectiveBuildPromise;
 
 		selectiveBuildPromise = (async () => {
-			while (queuedDevRoute) {
-				const nextRoute = queuedDevRoute;
-				queuedDevRoute = null;
+			while (queuedDevRoutes.length > 0) {
+				const nextRoute = queuedDevRoutes.shift();
+				if (!nextRoute) continue;
+				queuedRouteNames.delete(nextRoute.matchedRoute.name);
 
 				const activeBuild = builder.awaitBuildFinish();
 				if (builder.isBuilding() && activeBuild) {
@@ -184,7 +643,7 @@ export default function applyReactPluginToHTML(
 			})
 			.finally(() => {
 				selectiveBuildPromise = null;
-				if (queuedDevRoute) {
+				if (queuedDevRoutes.length > 0) {
 					void runQueuedDevBuilds();
 				}
 			});
@@ -214,12 +673,7 @@ export default function applyReactPluginToHTML(
 			pathname: matchedRoute.pathname,
 		} satisfies DevBuildTarget;
 
-		sendHMRMessage({
-			type: "route-build-started",
-			pathname: target.pathname,
-			routeName: target.matchedRoute.name,
-		});
-		queueDevRouteBuild(target);
+		scheduleDevRouteBuild(target);
 		void runQueuedDevBuilds();
 
 		return {
@@ -239,27 +693,7 @@ export default function applyReactPluginToHTML(
 		};
 	};
 
-	return {
-		name,
-		version,
-		serverReady({ builder }) {
-			liveBuilder = builder;
-		},
-		build: {
-			buildConfig: () => ({
-				entrypoints: [
-					...(isProd() ? [] : DevReactEntryPoints),
-					"@apply-react/client-routes.ts",
-					"@apply-react/client-hydrate.tsx",
-					"@apply-react/HMR.ts",
-					"@apply-react/client-shell.tsx",
-					"@apply-react/404.tsx",
-					"@apply-react/loading.tsx",
-					...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
-				],
-				splitting: true,
-				files: {
-					"@apply-react/client-routes.ts": `
+	const generateClientRoutesModule = () => `
           			${Object.entries(getRoutes(currentDevRoute, fileRouter))
 									.map(
 										([_pathname, filePath], index) =>
@@ -272,81 +706,207 @@ export default function applyReactPluginToHTML(
 												`"${pathname}": () => import("${fp}").then((mod) => mod.default)`,
 										)
 										.join(",\n")} };
-          			`,
-					...Object.assign(
-						{},
-						...Object.entries(fileRouter.routes).map(([_pathname, fp]) => ({
-							[toRoutePath(fp)]: `export { default } from "${fp}";`,
-						})),
-					),
-					"@apply-react/client-hydrate.tsx": `export * from "${join(__dirname, "hydrate.tsx")}";`,
-					"@apply-react/client-shell.tsx": `export { default } from "${pathToClientShell}";`,
-					// HMR modules
-					"@apply-react/HMR.ts": `export * from "${join(__dirname, "HMR.ts")}";`,
-					"@apply-react/HMR-enabled.ts": `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
-					"@apply-react/props.ts": `const props = ${JSON.stringify({ ...props, hydration, entrypointExtensions, fallbacks })}; export default props;`,
-					"@apply-react/404.tsx": `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
-					"@apply-react/loading.tsx": `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
-				},
-				plugins: [
-					{
-						name: "apply-routes-to-hydrate",
-						setup(build) {
-							build.onLoad({ filter: /.*/ }, async (args) => {
-								if (await directiveManager.pathIs("server-only", args.path)) {
-									return {
-										contents: "",
-										loader: "js",
-									};
-								}
-							});
+          			`;
 
-							const htmlrewriter = new HTMLRewriter()
-								.on("head", {
-									element(element) {
-										element.append(
-											`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
-											{
-												html: true,
-											},
+	const virtualModules: NonNullable<FrameMasterPlugin["virtualModules"]> = {
+		"@apply-react/client-routes.ts": {
+			contents: generateClientRoutesModule,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/client-hydrate.tsx": {
+			contents: `export * from "${join(__dirname, "hydrate.tsx")}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+		"@apply-react/client-shell.tsx": {
+			contents: `export { default } from "${pathToClientShell}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+		"@apply-react/HMR.ts": {
+			contents: `export * from "${join(__dirname, "HMR.ts")}";`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/react-refresh-runtime.ts": {
+			contents:
+				fastRefreshEnabled && !isProd()
+					? `export * from "${join(__dirname, "react-refresh-runtime.ts")}";`
+					: "export function performReactRefresh() {}",
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/HMR-enabled.ts": {
+			contents: `const HMR_ENABLED = ${enableHMR};export default HMR_ENABLED;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/fast-refresh-enabled.ts": {
+			contents: `const FAST_REFRESH_ENABLED = ${fastRefreshEnabled && !isProd()};export default FAST_REFRESH_ENABLED;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/hmr-websocket-protocol.ts": {
+			contents: `const HMR_WEBSOCKET_PROTOCOL = ${JSON.stringify(hmrWebsocketProtocol)};export default HMR_WEBSOCKET_PROTOCOL;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/development-mode.ts": {
+			contents: `const IS_DEVELOPMENT = ${!isProd()};export default IS_DEVELOPMENT;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/props.ts": {
+			contents: `const props = ${JSON.stringify({ ...props, enableHMR, enableFastRefresh: fastRefreshEnabled, HMROptions: { websocket: hmrWebsocketProtocol }, hydration, entrypointExtensions, fallbacks })}; export default props;`,
+			loader: "ts",
+			injectRuntime: true,
+		},
+		"@apply-react/404.tsx": {
+			contents: `export { default } from "${fallbacks.defaultNotFoundComponentPath ? join(cwd, fallbacks.defaultNotFoundComponentPath) : join(__dirname, "fallback", "404.tsx")}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+		"@apply-react/loading.tsx": {
+			contents: `export { default } from "${fallbacks.defaultLoadingComponentPath ? join(cwd, fallbacks.defaultLoadingComponentPath) : join(__dirname, "fallback", "loading.tsx")}";`,
+			loader: "tsx",
+			injectRuntime: true,
+		},
+	};
+
+	return {
+		name,
+		version,
+		requirement: {
+			frameMasterVersion: peerDependencies["frame-master"],
+		},
+		virtualModules,
+		serverReady({ builder }) {
+			liveBuilder = builder;
+			void refreshDependencyGraph();
+		},
+		serverStop() {
+			liveBuilder = null;
+			for (const ws of wsList) {
+				try {
+					ws.close();
+				} catch {}
+			}
+			wsList.length = 0;
+		},
+		build: {
+			buildConfig: () => {
+				return {
+					entrypoints: [
+						...(isProd() ? [] : [...DevReactEntryPoints]),
+						...VirtualModules,
+						...createEntrypoints(getRoutes(currentDevRoute, fileRouter)),
+					],
+					splitting: true,
+					// Shared chunks must retain stable URLs. Replacing every chunk on
+					// HMR creates another React/Refresh runtime and breaks hooks.
+					naming: {
+						entry: "[dir]/[name].[ext]",
+						chunk: isProd()
+							? resolveChunkNamingPattern()
+							: "chunk-[hash].[ext]",
+					},
+					minify: isProd(),
+					plugins: [
+						...(isProd() ? [] : [reactDedupePlugin]),
+						{
+							name: "apply-routes-to-hydrate",
+							setup(build) {
+								build.onLoad({ filter: /.*/ }, async (args) => {
+									if (await directiveManager.pathIs("server-only", args.path)) {
+										return createServerOnlyClientStub(
+											await getChainableContent(args),
+											args.path,
 										);
-									},
-								})
-								.on("script#__hydrate_script__", {
-									element(element) {
-										element.remove();
-									},
+									}
+
+									if (
+										!fastRefreshEnabled ||
+										isProd() ||
+										!shouldTransformReactRefreshModule(cwd, args.path)
+									) {
+										return;
+									}
+
+									const contents = await getChainableContent(args);
+									const moduleId = relative(cwd, args.path).replaceAll(
+										"\\",
+										"/",
+									);
+									return {
+										contents: await transformReactRefreshModule(contents, {
+											filename: args.path,
+											moduleId,
+										}),
+										loader: getBunLoader(args.path),
+									};
 								});
 
-							build.onLoad({ filter: /\.html$/ }, async (args) => {
-								const contents =
-									args.__chainedContents ?? (await Bun.file(args.path).text());
-								const transformed = htmlrewriter.transform(contents as string);
+								const htmlrewriter = new HTMLRewriter()
+									.on("head", {
+										element(element) {
+											element.append(
+												`<script src="@apply-react/client-hydrate.tsx" type="module" id="__hydrate_script__"></script>`,
+												{
+													html: true,
+												},
+											);
+										},
+									})
+									.on("script#__hydrate_script__", {
+										element(element) {
+											element.remove();
+										},
+									});
 
-								return {
-									contents: transformed,
-								};
-							});
-							build.finally("html", ({ contents }) => {
-								return {
-									contents: htmlrewriter.transform(contents as string),
-								};
-							});
-							build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
-								const realPath = join(
-									cwd,
-									args.path.replace("@apply-react/routes", route),
-								);
-								return {
-									path: realPath,
-								};
-							});
+								build.onLoad({ filter: /\.html$/ }, async (args) => {
+									const contents = await getChainableContent(args);
+									const transformed = htmlrewriter.transform(contents);
+									return {
+										contents: transformed,
+									};
+								});
+
+								build.finally("html", ({ contents }) => {
+									return {
+										contents: htmlrewriter.transform(contents as string),
+									};
+								});
+								build.onResolve({ filter: /^@apply-react\/routes/ }, (args) => {
+									const realPath = join(
+										cwd,
+										args.path.replace("@apply-react/routes", route),
+									);
+									return {
+										path: realPath,
+									};
+								});
+							},
 						},
-					},
-				],
-			}),
-			afterBuild() {
+					],
+				};
+			},
+			async afterBuild(_config, outputs) {
 				if (!pendingRouteUpdate) return;
+
+				const routeFileName = buildRouteUpdatePath(pendingRouteUpdate);
+				const routeOutput = outputs.outputs.find((output) =>
+					output.path
+						.replaceAll("\\", "/")
+						.endsWith(`/@apply-react/routes/${routeFileName}`),
+				);
+				if (routeOutput) {
+					const source = await Bun.file(routeOutput.path).text();
+					await Bun.write(
+						routeOutput.path,
+						cacheBustRoutePageChunk(source, Date.now()),
+					);
+				}
 
 				sendHMRMessage({
 					type: "update-routes",
@@ -355,6 +915,7 @@ export default function applyReactPluginToHTML(
 					routeName: pendingRouteUpdate.matchedRoute.name,
 				});
 				pendingRouteUpdate = null;
+				void refreshDependencyGraph();
 			},
 		},
 		serverConfig: {
@@ -399,33 +960,48 @@ export default function applyReactPluginToHTML(
 				}
 			},
 		},
-		fileSystemWatchDir: enableHMR ? [route] : undefined,
-		onFileSystemChange(_ev, _fname, absolutePath) {
-			console.log(`[Apply-React] File change detected: ${absolutePath}`);
+		fileSystemWatchDir: watchDirectoriesResolved,
+		async onFileSystemChange(_ev, _fname, absolutePath) {
+			const changedAbsolutePath = normalizeWatchedFilePath(cwd, absolutePath);
 			const routePathname = getRoutePathnameFromFileChange(
 				cwd,
 				routeDir,
-				absolutePath,
+				changedAbsolutePath,
 			);
-			if (!routePathname) return;
-			const matchedRoute = fileRouter.match(routePathname);
 
-			if (!matchedRoute) return;
+			if (routePathname) {
+				const matchedRoute = fileRouter.match(routePathname);
+				if (matchedRoute) {
+					scheduleDevRouteBuild({
+						pathname: matchedRoute.pathname,
+						matchedRoute,
+					});
+					await runQueuedDevBuilds();
+					return;
+				}
+			}
 
-			sendHMRMessage({
-				type: "route-build-started",
-				pathname: matchedRoute.pathname,
-				routeName: matchedRoute.name,
-			});
-			queueDevRouteBuild({ pathname: matchedRoute.pathname, matchedRoute });
-			void runQueuedDevBuilds();
+			const dependentRouteNames =
+				dependentRouteNamesByFilePath.get(changedAbsolutePath);
+			if (!dependentRouteNames || dependentRouteNames.size === 0) {
+				void refreshDependencyGraph();
+				return;
+			}
+
+			for (const routeName of dependentRouteNames) {
+				const target = targetByRouteName.get(routeName);
+				if (!target) continue;
+				scheduleDevRouteBuild(target);
+			}
+			await runQueuedDevBuilds();
 		},
 		router: {
 			async before_request(master) {
 				const acceptHeader = master.request.headers.get("accept") || "";
 				if (!acceptHeader.includes("text/html") || !currentDevRoute) return;
 				currentDevRoute = null;
-				queuedDevRoute = null;
+				queuedDevRoutes.length = 0;
+				queuedRouteNames.clear();
 				pendingRouteUpdate = null;
 				if (master.builder.isBuilding()) return;
 				await master.builder.build();
@@ -460,7 +1036,7 @@ export function getRoutePathnameFromFileChange(
 	changedPath: string,
 ) {
 	const normalizedPath = resolve(projectRoot, changedPath);
-	const relativePath = relative(routeDir, normalizedPath);
+	const relativePath = relative(routeDir, normalizedPath).replaceAll("\\", "/");
 
 	if (
 		!relativePath ||
@@ -474,8 +1050,8 @@ export function getRoutePathnameFromFileChange(
 }
 
 function filePathToPathname(fp: string) {
-	let fpNoExt = fp.replace(/\.(tsx|jsx)$/, "");
-	if (fpNoExt.endsWith("index")) {
+	let fpNoExt = fp.replaceAll("\\", "/").replace(/\.(tsx|jsx)$/, "");
+	if (fpNoExt.endsWith("/index") || fpNoExt === "index") {
 		fpNoExt = fpNoExt.slice(0, -"/index".length) || "/";
 	}
 	return fpNoExt.startsWith("/") ? fpNoExt : `/${fpNoExt}`;

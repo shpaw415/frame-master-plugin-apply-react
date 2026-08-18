@@ -14,6 +14,21 @@ declare module "@apply-react/HMR-enabled.ts" {
 	export default HMR_ENABLED;
 }
 
+declare module "@apply-react/fast-refresh-enabled.ts" {
+	const FAST_REFRESH_ENABLED: boolean;
+	export default FAST_REFRESH_ENABLED;
+}
+
+declare module "@apply-react/hmr-websocket-protocol.ts" {
+	const HMR_WEBSOCKET_PROTOCOL: "ws" | "wss" | "auto";
+	export default HMR_WEBSOCKET_PROTOCOL;
+}
+
+declare module "@apply-react/development-mode.ts" {
+	const IS_DEVELOPMENT: boolean;
+	export default IS_DEVELOPMENT;
+}
+
 declare module "@apply-react/404.tsx" {
 	export default function NotFound(): React.JSX.Element;
 }
@@ -25,6 +40,24 @@ declare module "@apply-react/loading.tsx" {
 declare module "@apply-react/props.ts" {
 	const ApplyReactPluginOptions: import("./index.ts").ApplyReactPluginOptions;
 	export default ApplyReactPluginOptions;
+}
+
+declare module "react-refresh/babel" {
+	const reactRefreshBabel: (
+		api: import("@babel/core").PluginAPI,
+		options: { skipEnvCheck?: boolean },
+	) => import("@babel/core").PluginObject;
+	export default reactRefreshBabel;
+}
+
+declare module "react-refresh/runtime" {
+	const refreshRuntime: {
+		injectIntoGlobalHook(globalObject: object): void;
+		register(type: unknown, id: string): void;
+		createSignatureFunctionForTransform(): (...args: unknown[]) => unknown;
+		performReactRefresh(): void;
+	};
+	export default refreshRuntime;
 }
 
 declare type RouteUpdateMessage = {

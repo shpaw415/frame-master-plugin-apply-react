@@ -1,3 +1,4 @@
+import "@apply-react/react-refresh-runtime.ts";
 import _ROUTES_ from "@apply-react/client-routes.ts";
 import Shell from "@apply-react/client-shell.tsx";
 import ApplyReactPluginOptions from "@apply-react/props.ts";

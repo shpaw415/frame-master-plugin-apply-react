@@ -1,6 +1,17 @@
+import FAST_REFRESH_ENABLED from "@apply-react/fast-refresh-enabled.ts";
+import HMR_WEBSOCKET_PROTOCOL from "@apply-react/hmr-websocket-protocol.ts";
+import { performReactRefresh } from "@apply-react/react-refresh-runtime.ts";
 import type { JSX } from "react";
 
-let ws: WebSocket;
+let ws: WebSocket | undefined;
+let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+/** Test-only helper to drop the shared client socket between unit tests. */
+export function __resetHmrSocketForTests() {
+	if (heartbeat) clearInterval(heartbeat);
+	heartbeat = undefined;
+	ws = undefined;
+}
 
 type RouteUpdatePayload = {
 	pathname: string;
@@ -17,9 +28,65 @@ type SetupHMRCallbacks = {
 	onRouteBuildMissing?: (route: { pathname: string }) => Promise<void> | void;
 };
 
+export function resolveClientHmrWebsocketScheme(
+	protocol: "ws" | "wss" | "auto" = HMR_WEBSOCKET_PROTOCOL,
+	pageProtocol: string = typeof window !== "undefined"
+		? window.location.protocol
+		: "http:",
+): "ws" | "wss" {
+	if (protocol === "ws" || protocol === "wss") return protocol;
+	return pageProtocol === "https:" ? "wss" : "ws";
+}
+
 function initializeWebSocket() {
-	if (ws) return;
-	ws = new WebSocket(`ws://${window.location.host}/_REACT_HMR/ws`);
+	const WebSocketImpl = globalThis.WebSocket;
+	if (
+		ws &&
+		ws.readyState !== WebSocketImpl.CLOSED &&
+		ws.readyState !== WebSocketImpl.CLOSING
+	) {
+		return;
+	}
+	const scheme = resolveClientHmrWebsocketScheme();
+	ws = new WebSocketImpl(`${scheme}://${window.location.host}/_REACT_HMR/ws`);
+	if (heartbeat) clearInterval(heartbeat);
+	heartbeat = setInterval(() => {
+		if (ws?.readyState === WebSocketImpl.OPEN) ws.send("ping");
+	}, 5_000);
+}
+
+function isRouteBuildStartedMessage(
+	message: unknown,
+): message is RouteBuildStartedMessage {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		(message as RouteBuildStartedMessage).type === "route-build-started" &&
+		typeof (message as RouteBuildStartedMessage).pathname === "string" &&
+		typeof (message as RouteBuildStartedMessage).routeName === "string"
+	);
+}
+
+function isRouteBuildMissingMessage(
+	message: unknown,
+): message is RouteBuildMissingMessage {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		(message as RouteBuildMissingMessage).type === "route-build-missing" &&
+		typeof (message as RouteBuildMissingMessage).pathname === "string"
+	);
+}
+
+function isRouteUpdateMessage(message: unknown): message is RouteUpdateMessage {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		(message as RouteUpdateMessage).type === "update-routes" &&
+		typeof (message as RouteUpdateMessage).pathname === "string" &&
+		typeof (message as RouteUpdateMessage).routeName === "string" &&
+		typeof (message as RouteUpdateMessage).route === "string"
+	);
 }
 
 /**
@@ -46,41 +113,59 @@ export function setupHMR(
 		onRouteBuildMissing,
 	}: SetupHMRCallbacks =
 		typeof callbacks === "function" ? { onRoutesUpdate: callbacks } : callbacks;
+	const createRouteComponentLoader = (route: string) => {
+		const routeUrl = `/@apply-react/routes/${route}?t=${Date.now()}`;
+		let componentPromise: Promise<() => JSX.Element> | undefined;
+
+		return () =>
+			(componentPromise ??= import(routeUrl).then((mod) => {
+				if (FAST_REFRESH_ENABLED) performReactRefresh();
+				return mod.default as () => JSX.Element;
+			}));
+	};
 	const handleMessage = async (event: MessageEvent) => {
-		const message = JSON.parse(event.data) as HMRMessage;
-		switch (message.type) {
-			case "update-routes":
+		let message: unknown;
+		try {
+			message = JSON.parse(event.data as string);
+		} catch {
+			console.warn("[Apply-React HMR] Received malformed websocket payload");
+			return;
+		}
+
+		try {
+			if (isRouteUpdateMessage(message)) {
 				await onRoutesUpdate({
 					pathname: message.pathname,
 					routeName: message.routeName,
-					component: () =>
-						import(
-							`/@apply-react/routes/${message.route}?t=${Date.now()}`
-						).then((mod) => mod.default as () => JSX.Element),
+					component: createRouteComponentLoader(message.route),
 				});
-				break;
-			case "route-build-started":
+				return;
+			}
+
+			if (isRouteBuildStartedMessage(message)) {
 				await onRouteBuildStarted?.({
 					pathname: message.pathname,
 					routeName: message.routeName,
 				});
-				break;
-			case "route-build-missing":
+				return;
+			}
+
+			if (isRouteBuildMissingMessage(message)) {
 				await onRouteBuildMissing?.({ pathname: message.pathname });
-				break;
-			default:
-				break;
+			}
+		} catch (error) {
+			console.error("[Apply-React HMR] Callback handling failed", error);
 		}
 	};
 
-	ws.addEventListener("message", handleMessage);
+	ws?.addEventListener("message", handleMessage);
 	return () => {
-		ws.removeEventListener("message", handleMessage);
+		ws?.removeEventListener("message", handleMessage);
 	};
 }
 
 export async function requestDevRouteBuild(pathname: string) {
-	const response = await fetch(
+	const response = await globalThis.fetch(
 		`/_REACT_HMR/build-route?pathname=${encodeURIComponent(pathname)}`,
 		{
 			headers: { accept: "application/json" },
