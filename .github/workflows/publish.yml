@@ -1,8 +1,10 @@
 name: Publish to npm
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -10,33 +12,39 @@ permissions:
 
 jobs:
   publish:
-    name: Publish package
     runs-on: ubuntu-latest
-    if: ${{ !github.event.release.prerelease }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
         with:
-          ref: ${{ github.event.release.tag_name }}
-      - uses: oven-sh/setup-bun@v2.2.0
-      - uses: actions/setup-node@v7.0.0
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-      - run: bun run test
-      - name: Verify release tag matches package version
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+      - id: package
         run: |
-          node --input-type=module <<'EOF'
-          import { readFile } from "node:fs/promises";
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-          const { version } = JSON.parse(await readFile("package.json", "utf8"));
-          const tagVersion = process.env.RELEASE_TAG.replace(/^v/, "");
+      - id: npm
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
 
-          if (version !== tagVersion) {
-            throw new Error(`Release tag ${process.env.RELEASE_TAG} does not match package version ${version}`);
-          }
-          EOF
-      - run: npm publish --provenance
+      - if: steps.npm.outputs.publish == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.npm.outputs.publish == 'true'
+        run: bun test
+      - if: steps.npm.outputs.publish == 'true'
+        run: npm publish --access public --provenance
