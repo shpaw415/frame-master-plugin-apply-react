@@ -65,6 +65,7 @@ declare type RouteUpdateMessage = {
 	route: string;
 	pathname: string;
 	routeName: string;
+	sourceHash?: string;
 };
 
 declare type RouteBuildStartedMessage = {

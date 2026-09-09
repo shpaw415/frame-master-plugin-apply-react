@@ -81,15 +81,27 @@ describe("resolveChunkNamingPattern", () => {
 });
 
 describe("cacheBustRoutePageChunk", () => {
-	test("only cache-busts the route page chunk, not shared side-effect chunks", () => {
+	test("cache-busts every named chunk import and leaves side-effect vendor chunks", () => {
 		const output = cacheBustRoutePageChunk(
 			`import { Page } from "../../chunk-page.js";
+import { Comp } from "../../chunk-comp.js";
 import "../../chunk-react.js";
 export { Page as default };`,
 			123,
 		);
 		expect(output).toContain('from "../../chunk-page.js?t=123"');
+		expect(output).toContain('from "../../chunk-comp.js?t=123"');
 		expect(output).toContain('import "../../chunk-react.js"');
+		expect(output).not.toContain("chunk-react.js?t=");
+	});
+
+	test("replaces an existing cache-bust stamp on named chunk imports", () => {
+		const output = cacheBustRoutePageChunk(
+			`import { Page } from "../../chunk-page.js?t=1";`,
+			99,
+		);
+		expect(output).toContain('from "../../chunk-page.js?t=99"');
+		expect(output).not.toContain("t=1");
 	});
 });
 

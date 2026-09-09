@@ -111,6 +111,7 @@ describe("setupHMR", () => {
 			pathname: "/dynamic/123",
 			routeName: "/dynamic/[id]",
 			route: "dynamic/[id].js",
+			sourceHash: "abc123",
 		});
 		await socket?.emit({
 			type: "route-build-missing",
@@ -125,6 +126,7 @@ describe("setupHMR", () => {
 			pathname: "/dynamic/123",
 			routeName: "/dynamic/[id]",
 			component: expect.any(Function),
+			sourceHash: "abc123",
 		});
 		expect(onRouteBuildMissing).toHaveBeenCalledWith({
 			pathname: "/missing",

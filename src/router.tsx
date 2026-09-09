@@ -4,6 +4,7 @@ import IS_DEVELOPMENT from "@apply-react/development-mode.ts";
 import FAST_REFRESH_ENABLED from "@apply-react/fast-refresh-enabled.ts";
 import HMR_ENABLED from "@apply-react/HMR-enabled.ts";
 import FallbackDefaultLoading from "@apply-react/loading.tsx";
+import { performReactRefresh } from "@apply-react/react-refresh-runtime.ts";
 import {
 	FileSystemRouter,
 	type MatchedRoute,
@@ -18,6 +19,7 @@ import {
 	useState,
 } from "react";
 import { requestDevRouteBuild, setupHMR } from "./HMR";
+import { decideHotApply } from "./hmr-apply";
 import {
 	getRelatedLayoutEntriesFromPathname,
 	LayoutCache,
@@ -347,6 +349,8 @@ export function RouterHost({
 	const navigationRef = useRef(0);
 	const pendingDevRouteRef = useRef<PendingDevRoute | null>(null);
 	const buildNoticeTimeoutRef = useRef<number | null>(null);
+	const lastHotPageTypeRef = useRef<PageComponent | null>(null);
+	const lastHotSourceHashRef = useRef<string | undefined>(undefined);
 	const [pageKey, setPageKey] = useState(0);
 	const [activeLayouts, setActiveLayouts] = useState<LayoutEntry[]>(
 		() => initialSnapshot?.layouts ?? [],
@@ -546,11 +550,46 @@ export function RouterHost({
 								pendingRoute?.routeName === newRoutes.routeName;
 							const isActiveRoute = activeRoute?.name === newRoutes.routeName;
 
-							if (FAST_REFRESH_ENABLED && isActiveRoute) {
-								// Re-import so $RefreshReg$ runs; performReactRefresh (in HMR)
-								// patches fibers in place. Do not bump pageKey — that remounts
-								// ErrorWrapper, keeps a stale CurrentPage, and wipes hook state.
-								await safeComponentLoader();
+							let nextPage: PageComponent | undefined;
+							if (isActiveRoute) {
+								try {
+									nextPage = await safeComponentLoader();
+								} catch {
+									return;
+								}
+							}
+
+							let action = decideHotApply({
+								fastRefreshEnabled: FAST_REFRESH_ENABLED,
+								isActiveRoute,
+								previousType: lastHotPageTypeRef.current,
+								nextType: nextPage,
+								sourceHash: newRoutes.sourceHash,
+								lastAppliedHash: lastHotSourceHashRef.current,
+							});
+
+							if (action === "refresh" && nextPage) {
+								try {
+									performReactRefresh();
+								} catch (error) {
+									console.error(
+										"[Apply-React HMR] Fast Refresh failed, remounting page",
+										error,
+									);
+									action = "remount";
+								}
+							}
+
+							if (action === "reload") {
+								window.location.reload();
+								return;
+							}
+
+							if (nextPage) {
+								lastHotPageTypeRef.current = nextPage;
+							}
+							if (newRoutes.sourceHash) {
+								lastHotSourceHashRef.current = newRoutes.sourceHash;
 							}
 
 							setRoutes((curr) => {
@@ -561,9 +600,14 @@ export function RouterHost({
 								if (isPendingRoute && pendingRoute) {
 									pendingDevRouteRef.current = null;
 									setCurrentPage(pendingRoute.pathname, nextRoutes);
-								} else if (!FAST_REFRESH_ENABLED) {
+								} else if (action === "remount") {
 									LayoutCache.clear();
-									setCurrentPage(window.location.pathname, nextRoutes);
+									if (nextPage) {
+										_setCurrentPage(() => nextPage as PageComponent);
+										setPageKey((key) => key + 1);
+									} else {
+										setCurrentPage(window.location.pathname, nextRoutes);
+									}
 								}
 
 								return nextRoutes;

@@ -21,6 +21,7 @@ type RouteUpdate = {
 	pathname: string;
 	routeName: string;
 	component: () => Promise<() => JSX.Element>;
+	sourceHash?: string;
 };
 
 let onRoutesUpdate: ((route: RouteUpdate) => Promise<void> | void) | undefined;
@@ -174,8 +175,46 @@ describe("RouterHost HMR", () => {
 
 		expect(componentLoads).toBe(1);
 		expect(getInput()?.value).toBe("kept during HMR");
-		// pageKey must not bump on Fast Refresh or page hooks reset
 		expect(pageHeading()?.textContent).toBe("Main Page 1");
 		expect(routeChangeCount).toBe(0);
+	});
+
+	test("reloads when a new source hash reuses the same module identity", async () => {
+		const hotUpdate = onRoutesUpdate;
+		expect(hotUpdate).toBeDefined();
+		if (!hotUpdate) throw new Error("Missing HMR route update callback");
+
+		const reload = mock(() => {});
+		const location = window.location as Location & { reload: () => void };
+		const originalReload = location.reload;
+		location.reload = reload;
+
+		try {
+			await act(async () => {
+				await hotUpdate({
+					pathname: "/",
+					routeName: "/",
+					sourceHash: "v1",
+					component: async () => HomePage,
+				});
+				await flushNavigation();
+			});
+
+			expect(reload).toHaveBeenCalledTimes(0);
+
+			await act(async () => {
+				await hotUpdate({
+					pathname: "/",
+					routeName: "/",
+					sourceHash: "v2",
+					component: async () => HomePage,
+				});
+				await flushNavigation();
+			});
+
+			expect(reload).toHaveBeenCalledTimes(1);
+		} finally {
+			location.reload = originalReload;
+		}
 	});
 });
