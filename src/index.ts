@@ -9,6 +9,7 @@ import {
 } from "frame-master/plugin";
 import { directiveManager, isProd } from "frame-master/utils";
 import { name, peerDependencies, version } from "../package.json";
+import { hashHmrSource } from "./hmr-apply";
 import { transformReactRefreshModule } from "./react-refresh-transform";
 
 const TRACKED_SOURCE_EXTENSIONS = new Set([
@@ -76,16 +77,34 @@ export function resolveChunkNamingPattern(
 	return `chunk-[hash]-${buildStamp}.[ext]`;
 }
 
+const DEFAULT_EXPORT_BINDING = /\bexport\s*\{[^}]*\b(\w+)\s+as\s+default\b/;
+
 /**
- * Cache-bust only the changed route's page chunk. Shared chunks intentionally
- * keep stable URLs so React and React Refresh remain singletons in the page.
+ * Cache-bust only the chunk that provides this route's default export.
+ * Other named chunk imports (shared context, React) must keep stable URLs so
+ * `useContext` and providers stay on one module instance.
  */
 export function cacheBustRoutePageChunk(source: string, buildStamp: number) {
+	const defaultName = DEFAULT_EXPORT_BINDING.exec(source)?.[1];
+	let busted = false;
+
 	return source.replace(
-		/(from\s+["'][^"']*chunk-[^"']+\.js)(["'])/,
-		`$1?t=${buildStamp}$2`,
+		/import\s*\{([\s\S]*?)\}\s*from\s*(["'])([^"']*chunk-[^"']+\.js)(?:\?t=\d+)?\2/g,
+		(full, bindings: string, quote: string, specifier: string) => {
+			const isPageChunk = defaultName
+				? new RegExp(`\\b${defaultName}\\b`).test(bindings)
+				: !busted;
+			if (!isPageChunk) return full;
+			busted = true;
+			return full.replace(
+				/from\s*(["'])([^"']+)\1/,
+				`from ${quote}${specifier}?t=${buildStamp}${quote}`,
+			);
+		},
 	);
 }
+
+export { hashHmrSource } from "./hmr-apply";
 
 export function extractImportSpecifiers(source: string): string[] {
 	const specifiers = new Set<string>();
@@ -540,11 +559,13 @@ export default function applyReactPluginToHTML(
 	};
 
 	let currentDevRoute: DevBuildTarget | null = null;
-	const queuedDevRoutes: DevBuildTarget[] = [];
-	const queuedRouteNames = new Set<string>();
+	const dirtyDevRoutes = new Map<string, DevBuildTarget>();
 	let pendingRouteUpdate: DevBuildTarget | null = null;
 	let selectiveBuildPromise: Promise<void> | null = null;
 	let refreshDependencyGraphPromise: Promise<void> | null = null;
+	let fileChangeFlush: Promise<void> | null = null;
+	let fileChangeTimer: ReturnType<typeof setTimeout> | null = null;
+	const pendingFileChanges = new Set<string>();
 	let targetByRouteName = new Map<string, DevBuildTarget>();
 	let dependentRouteNamesByFilePath = new Map<string, Set<string>>();
 
@@ -556,20 +577,13 @@ export default function applyReactPluginToHTML(
 		});
 	};
 
-	const queueDevRouteBuild = (target: DevBuildTarget) => {
-		const routeName = target.matchedRoute.name;
-		if (queuedRouteNames.has(routeName)) return;
-		queuedRouteNames.add(routeName);
-		queuedDevRoutes.push(target);
-	};
-
 	const scheduleDevRouteBuild = (target: DevBuildTarget) => {
 		sendHMRMessage({
 			type: "route-build-started",
 			pathname: target.pathname,
 			routeName: target.matchedRoute.name,
 		});
-		queueDevRouteBuild(target);
+		dirtyDevRoutes.set(target.matchedRoute.name, target);
 	};
 
 	const collectDevBuildTargets = () => {
@@ -623,10 +637,11 @@ export default function applyReactPluginToHTML(
 		if (!builder || selectiveBuildPromise) return selectiveBuildPromise;
 
 		selectiveBuildPromise = (async () => {
-			while (queuedDevRoutes.length > 0) {
-				const nextRoute = queuedDevRoutes.shift();
-				if (!nextRoute) continue;
-				queuedRouteNames.delete(nextRoute.matchedRoute.name);
+			while (dirtyDevRoutes.size > 0) {
+				const nextEntry = dirtyDevRoutes.entries().next().value;
+				if (!nextEntry) break;
+				const [routeName, nextRoute] = nextEntry;
+				dirtyDevRoutes.delete(routeName);
 
 				const activeBuild = builder.awaitBuildFinish();
 				if (builder.isBuilding() && activeBuild) {
@@ -643,7 +658,7 @@ export default function applyReactPluginToHTML(
 			})
 			.finally(() => {
 				selectiveBuildPromise = null;
-				if (queuedDevRoutes.length > 0) {
+				if (dirtyDevRoutes.size > 0) {
 					void runQueuedDevBuilds();
 				}
 			});
@@ -707,6 +722,48 @@ export default function applyReactPluginToHTML(
 										)
 										.join(",\n")} };
           			`;
+
+	const processWatchedFileChange = async (changedAbsolutePath: string) => {
+		const routePathname = getRoutePathnameFromFileChange(
+			cwd,
+			routeDir,
+			changedAbsolutePath,
+		);
+
+		if (routePathname) {
+			const matchedRoute = fileRouter.match(routePathname);
+			if (matchedRoute) {
+				scheduleDevRouteBuild({
+					pathname: matchedRoute.pathname,
+					matchedRoute,
+				});
+				await runQueuedDevBuilds();
+				return;
+			}
+		}
+
+		const dependentRouteNames =
+			dependentRouteNamesByFilePath.get(changedAbsolutePath);
+		if (!dependentRouteNames || dependentRouteNames.size === 0) {
+			void refreshDependencyGraph();
+			return;
+		}
+
+		for (const routeName of dependentRouteNames) {
+			const target = targetByRouteName.get(routeName);
+			if (!target) continue;
+			scheduleDevRouteBuild(target);
+		}
+		await runQueuedDevBuilds();
+	};
+
+	const flushPendingFileChanges = async () => {
+		const changes = [...pendingFileChanges];
+		pendingFileChanges.clear();
+		for (const changedAbsolutePath of changes) {
+			await processWatchedFileChange(changedAbsolutePath);
+		}
+	};
 
 	const virtualModules: NonNullable<FrameMasterPlugin["virtualModules"]> = {
 		"@apply-react/client-routes.ts": {
@@ -787,6 +844,14 @@ export default function applyReactPluginToHTML(
 		},
 		serverStop() {
 			liveBuilder = null;
+			if (fileChangeTimer) {
+				clearTimeout(fileChangeTimer);
+				fileChangeTimer = null;
+			}
+			fileChangeFlush = null;
+			pendingFileChanges.clear();
+			dirtyDevRoutes.clear();
+			pendingRouteUpdate = null;
 			for (const ws of wsList) {
 				try {
 					ws.close();
@@ -900,19 +965,29 @@ export default function applyReactPluginToHTML(
 						.replaceAll("\\", "/")
 						.endsWith(`/@apply-react/routes/${routeFileName}`),
 				);
+				const buildStamp = Date.now();
 				if (routeOutput) {
 					const source = await Bun.file(routeOutput.path).text();
 					await Bun.write(
 						routeOutput.path,
-						cacheBustRoutePageChunk(source, Date.now()),
+						cacheBustRoutePageChunk(source, buildStamp),
 					);
 				}
+
+				let sourceHash = String(buildStamp);
+				try {
+					const routeSource = await Bun.file(
+						pendingRouteUpdate.matchedRoute.filePath,
+					).text();
+					sourceHash = hashHmrSource(routeSource);
+				} catch {}
 
 				sendHMRMessage({
 					type: "update-routes",
 					route: buildRouteUpdatePath(pendingRouteUpdate),
 					pathname: pendingRouteUpdate.pathname,
 					routeName: pendingRouteUpdate.matchedRoute.name,
+					sourceHash,
 				});
 				pendingRouteUpdate = null;
 				void refreshDependencyGraph();
@@ -962,48 +1037,33 @@ export default function applyReactPluginToHTML(
 		},
 		fileSystemWatchDir: watchDirectoriesResolved,
 		async onFileSystemChange(_ev, _fname, absolutePath) {
-			const changedAbsolutePath = normalizeWatchedFilePath(cwd, absolutePath);
-			const routePathname = getRoutePathnameFromFileChange(
-				cwd,
-				routeDir,
-				changedAbsolutePath,
-			);
-
-			if (routePathname) {
-				const matchedRoute = fileRouter.match(routePathname);
-				if (matchedRoute) {
-					scheduleDevRouteBuild({
-						pathname: matchedRoute.pathname,
-						matchedRoute,
-					});
-					await runQueuedDevBuilds();
-					return;
-				}
+			pendingFileChanges.add(normalizeWatchedFilePath(cwd, absolutePath));
+			if (!fileChangeFlush) {
+				fileChangeFlush = new Promise((resolve) => {
+					fileChangeTimer = setTimeout(() => {
+						void flushPendingFileChanges().finally(() => {
+							fileChangeFlush = null;
+							fileChangeTimer = null;
+							resolve();
+						});
+					}, 50);
+				});
 			}
-
-			const dependentRouteNames =
-				dependentRouteNamesByFilePath.get(changedAbsolutePath);
-			if (!dependentRouteNames || dependentRouteNames.size === 0) {
-				void refreshDependencyGraph();
-				return;
-			}
-
-			for (const routeName of dependentRouteNames) {
-				const target = targetByRouteName.get(routeName);
-				if (!target) continue;
-				scheduleDevRouteBuild(target);
-			}
-			await runQueuedDevBuilds();
+			return fileChangeFlush;
 		},
 		router: {
 			async before_request(master) {
 				const acceptHeader = master.request.headers.get("accept") || "";
 				if (!acceptHeader.includes("text/html") || !currentDevRoute) return;
+				if (selectiveBuildPromise || master.builder.isBuilding()) {
+					const pending =
+						selectiveBuildPromise ?? master.builder.awaitBuildFinish();
+					if (pending) await pending;
+					return;
+				}
 				currentDevRoute = null;
-				queuedDevRoutes.length = 0;
-				queuedRouteNames.clear();
+				dirtyDevRoutes.clear();
 				pendingRouteUpdate = null;
-				if (master.builder.isBuilding()) return;
 				await master.builder.build();
 			},
 			html_rewrite: {

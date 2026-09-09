@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
+import applyReactPluginToHTML, {
 	createServerOnlyClientStub,
 	extractImportSpecifiers,
 	getRoutePathnameFromFileChange,
@@ -140,6 +140,21 @@ describe("resolveFastRefreshEnabled", () => {
 		expect(resolveFastRefreshEnabled(true, undefined)).toBeTrue();
 		expect(resolveFastRefreshEnabled(true, false)).toBeFalse();
 		expect(resolveFastRefreshEnabled(false, true)).toBeFalse();
+	});
+});
+
+describe("HMR plugin hooks", () => {
+	test("registers file watching and afterBuild when HMR is enabled", () => {
+		const plugin = applyReactPluginToHTML({
+			style: "nextjs",
+			route: "test/src/pages",
+			enableHMR: true,
+			enableFastRefresh: true,
+		});
+
+		expect(plugin.onFileSystemChange).toBeFunction();
+		expect(plugin.build?.afterBuild).toBeFunction();
+		expect(plugin.fileSystemWatchDir).toEqual([".", "node_modules"]);
 	});
 });
 

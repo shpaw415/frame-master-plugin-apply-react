@@ -1,6 +1,4 @@
-import FAST_REFRESH_ENABLED from "@apply-react/fast-refresh-enabled.ts";
 import HMR_WEBSOCKET_PROTOCOL from "@apply-react/hmr-websocket-protocol.ts";
-import { performReactRefresh } from "@apply-react/react-refresh-runtime.ts";
 import type { JSX } from "react";
 
 let ws: WebSocket | undefined;
@@ -17,6 +15,7 @@ type RouteUpdatePayload = {
 	pathname: string;
 	routeName: string;
 	component: () => Promise<() => JSX.Element>;
+	sourceHash?: string;
 };
 
 type SetupHMRCallbacks = {
@@ -85,7 +84,9 @@ function isRouteUpdateMessage(message: unknown): message is RouteUpdateMessage {
 		(message as RouteUpdateMessage).type === "update-routes" &&
 		typeof (message as RouteUpdateMessage).pathname === "string" &&
 		typeof (message as RouteUpdateMessage).routeName === "string" &&
-		typeof (message as RouteUpdateMessage).route === "string"
+		typeof (message as RouteUpdateMessage).route === "string" &&
+		(typeof (message as RouteUpdateMessage).sourceHash === "undefined" ||
+			typeof (message as RouteUpdateMessage).sourceHash === "string")
 	);
 }
 
@@ -118,10 +119,9 @@ export function setupHMR(
 		let componentPromise: Promise<() => JSX.Element> | undefined;
 
 		return () =>
-			(componentPromise ??= import(routeUrl).then((mod) => {
-				if (FAST_REFRESH_ENABLED) performReactRefresh();
-				return mod.default as () => JSX.Element;
-			}));
+			(componentPromise ??= import(routeUrl).then(
+				(mod) => mod.default as () => JSX.Element,
+			));
 	};
 	const handleMessage = async (event: MessageEvent) => {
 		let message: unknown;
@@ -138,6 +138,7 @@ export function setupHMR(
 					pathname: message.pathname,
 					routeName: message.routeName,
 					component: createRouteComponentLoader(message.route),
+					sourceHash: message.sourceHash,
 				});
 				return;
 			}
