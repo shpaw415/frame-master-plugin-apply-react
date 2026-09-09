@@ -81,27 +81,41 @@ describe("resolveChunkNamingPattern", () => {
 });
 
 describe("cacheBustRoutePageChunk", () => {
-	test("cache-busts every named chunk import and leaves side-effect vendor chunks", () => {
+	test("busts only the default-export page chunk, not shared context or React chunks", () => {
 		const output = cacheBustRoutePageChunk(
-			`import { Page } from "../../chunk-page.js";
-import { Comp } from "../../chunk-comp.js";
-import "../../chunk-react.js";
-export { Page as default };`,
+			`import {
+  MainPage
+} from "../../chunk-page.js";
+import {
+  customContext
+} from "../../chunk-context.js";
+import {
+  require_react
+} from "../../chunk-react.js";
+import "../../chunk-runtime.js";
+export {
+  MainPage as default
+};`,
 			123,
 		);
 		expect(output).toContain('from "../../chunk-page.js?t=123"');
-		expect(output).toContain('from "../../chunk-comp.js?t=123"');
-		expect(output).toContain('import "../../chunk-react.js"');
+		expect(output).toContain('from "../../chunk-context.js"');
+		expect(output).toContain('from "../../chunk-react.js"');
+		expect(output).not.toContain("chunk-context.js?t=");
 		expect(output).not.toContain("chunk-react.js?t=");
+		expect(output).toContain('import "../../chunk-runtime.js"');
 	});
 
-	test("replaces an existing cache-bust stamp on named chunk imports", () => {
+	test("replaces an existing cache-bust stamp on the page chunk only", () => {
 		const output = cacheBustRoutePageChunk(
-			`import { Page } from "../../chunk-page.js?t=1";`,
+			`import { MainPage } from "../../chunk-page.js?t=1";
+import { customContext } from "../../chunk-context.js?t=1";
+export { MainPage as default };`,
 			99,
 		);
 		expect(output).toContain('from "../../chunk-page.js?t=99"');
-		expect(output).not.toContain("t=1");
+		expect(output).toContain('from "../../chunk-context.js?t=1"');
+		expect(output).not.toContain("chunk-page.js?t=1");
 	});
 });
 

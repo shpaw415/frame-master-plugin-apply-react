@@ -77,16 +77,30 @@ export function resolveChunkNamingPattern(
 	return `chunk-[hash]-${buildStamp}.[ext]`;
 }
 
+const DEFAULT_EXPORT_BINDING = /\bexport\s*\{[^}]*\b(\w+)\s+as\s+default\b/;
+
 /**
- * Cache-bust named `from "...chunk-*.js"` imports on the changed route entry.
- * Side-effect `import "...chunk-*.js"` lines (React / Refresh runtime) stay
- * stable so those modules remain singletons.
+ * Cache-bust only the chunk that provides this route's default export.
+ * Other named chunk imports (shared context, React) must keep stable URLs so
+ * `useContext` and providers stay on one module instance.
  */
 export function cacheBustRoutePageChunk(source: string, buildStamp: number) {
+	const defaultName = DEFAULT_EXPORT_BINDING.exec(source)?.[1];
+	let busted = false;
+
 	return source.replace(
-		/from\s+(["'])([^"']*chunk-[^"']+\.js)(?:\?t=\d+)?\1/g,
-		(_match, quote: string, specifier: string) =>
-			`from ${quote}${specifier}?t=${buildStamp}${quote}`,
+		/import\s*\{([\s\S]*?)\}\s*from\s*(["'])([^"']*chunk-[^"']+\.js)(?:\?t=\d+)?\2/g,
+		(full, bindings: string, quote: string, specifier: string) => {
+			const isPageChunk = defaultName
+				? new RegExp(`\\b${defaultName}\\b`).test(bindings)
+				: !busted;
+			if (!isPageChunk) return full;
+			busted = true;
+			return full.replace(
+				/from\s*(["'])([^"']+)\1/,
+				`from ${quote}${specifier}?t=${buildStamp}${quote}`,
+			);
+		},
 	);
 }
 
